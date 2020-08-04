@@ -197,7 +197,8 @@ class KittiRCNNDataset(KittiDataset):
     @staticmethod
     def get_valid_flag(pts_rect, pts_img, pts_rect_depth, img_shape):
         """
-        Valid point should be in the image (and in the PC_AREA_SCOPE)
+        Valid point should be in the image (and in the PC_AREA_SCOPE), i.e. cropping pcl such that 
+        it is within the front image. 
         :param pts_rect:
         :param pts_img:
         :param pts_rect_depth:
@@ -252,7 +253,7 @@ class KittiRCNNDataset(KittiDataset):
             pts_lidar = self.get_lidar(sample_id)
 
             # get valid point (projected points should be in image)
-            pts_rect = calib.lidar_to_rect(pts_lidar[:, 0:3])
+            pts_rect = calib.lidar_to_rect(pts_lidar[:, 0:3]) # using camera image to sub-sample network input points 
             pts_intensity = pts_lidar[:, 3]
         else:
             calib = self.get_calib(sample_id % 10000)
@@ -264,6 +265,8 @@ class KittiRCNNDataset(KittiDataset):
             aug_pts = np.fromfile(pts_file, dtype=np.float32).reshape(-1, 4)
             pts_rect, pts_intensity = aug_pts[:, 0:3], aug_pts[:, 3]
 
+        # Since KITTI dataset 3d bbox labels are the ones only on cam_2, check for valid gt 
+        # by checking if it resides in the image (due to GT-AUG) 
         pts_img, pts_rect_depth = calib.rect_to_img(pts_rect)
         pts_valid_flag = self.get_valid_flag(pts_rect, pts_img, pts_rect_depth, img_shape)
 
@@ -1051,6 +1054,7 @@ class KittiRCNNDataset(KittiDataset):
 
     def aug_roi_by_noise_batch(self, roi_boxes3d, gt_boxes3d, aug_times=10):
         """
+        Enlarging the 3D GT box by 0.2m on each side of the object for robust segmentation. 
         :param roi_boxes3d: (N, 7)
         :param gt_boxes3d: (N, 7)
         :return:
@@ -1102,6 +1106,8 @@ class KittiRCNNDataset(KittiDataset):
         return sample_info
 
     def collate_batch(self, batch):
+        # TODO: what is this function used for?
+        # testing
         if self.mode != 'TRAIN' and cfg.RCNN.ENABLED and not cfg.RPN.ENABLED:
             assert batch.__len__() == 1
             return batch[0]

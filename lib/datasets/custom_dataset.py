@@ -16,7 +16,7 @@ from lib.config import cfg
 # DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../data/med/hdf5/")
 
 class CustomRCNNDataset(Dataset): 
-    def __init__(self, root, split='train', mode='TRAIN', num_points, batch_size=10, normalize=False, 
+    def __init__(self, root, num_points, split='train', mode='TRAIN', batch_size=10, normalize=False, 
                 intensity_channel=True, shuffle=True, rcnn_training_roi_dir=None, 
                 rcnn_training_feature_dir=None, rcnn_eval_roi_dir=None,
                 rcnn_eval_feature_dir=None): 
@@ -26,7 +26,7 @@ class CustomRCNNDataset(Dataset):
         :param num_points: number of points to process for each pointcloud (needs to be the same)
         :param normalize: whether include the normalized coords in features (default: False)
         :param intensity_channel: whether to include the intensity value to xyz coordinates (default: True)
-        :param shuffek: whether to shuffle the data (default: True)
+        :param shuffle: whether to shuffle the data (default: True)
         """
         self.root = root
         self.split = split 
@@ -48,7 +48,7 @@ class CustomRCNNDataset(Dataset):
         # TODO: create batches 
 
         data_batchlist, label_batchlist = [], []                                                                                       
-        for f in all_files:                                                                                                            
+        for f in all_files:                                                                                                         
             data, labels, bbox = data_utils.load_h5(f, bbox=True)    
             #bbox: (N, 7) [x, y, z, h, w, l, ry]
             centroid, h, w, l, angle = bbox[0:3], bbox[3], bbox[4], bbox[5], bbox[6] 
@@ -84,32 +84,74 @@ class CustomRCNNDataset(Dataset):
         assert mode in ['TRAIN', 'EVAL', 'TEST'], 'Invalid mode: %s' % mode
         self.mode = mode
 
+    def shuffle_data(self):
+        """ Shuffle data and labels.
+            
+            Args: 
+                data [numpy array]: B,N,... 
+                label [numpy array]: B,... 
+            Returns:
+                shuffled data, label and shuffle indices
+        """
+        idx = np.arange(len(labels))
+        np.random.shuffle(idx)
+        return self.data[idx, ...], self.labels[idx], idx
+
 
     def get_lidar(self, idx):
-        #TODO
+        """[summary]
+
+        Args:
+            idx ([type]): [description]
+
+        Raises:
+            NotImplementedError: [description]
+        """
+        current_points = torch.from_numpy(self.data[index, pt_idxs].copy()).float()
         raise NotImplementedError
 
     def get_label(self, idx):
-        #TODO
+        current_labels = torch.from_numpy(self.labels[index, pt_idxs].copy()).long()
         raise NotImplementedError    
 
     def __len__(self):
         return len(self.data)
 
-    def __getitem__(self):
+    def __getitem__(self, index):
         # TODO change from random sampling to farthest point sampling 
         pt_idxs = np.arange(0, self.num_points)
-        np.random.shuffle(pt_idxs)
+        if self.shuffle: 
+            np.random.shuffle(pt_idxs)
 
-        current_points = torch.from_numpy(self.data[idx, pt_idxs].copy()).float()
-        current_labels = torch.from_numpy(self.labels[idx, pt_idxs].copy()).long()
+        if cfg.RPN.ENABLED:
+            return self.get_rpn_sample(index)
+        elif cfg.RCNN.ENABLED:
+            if self.mode == 'TRAIN':
+                if cfg.RCNN.ROI_SAMPLE_JIT:
+                    return self.get_rcnn_sample_jit(index)
+                else:
+                    return self.get_rcnn_training_sample_batch(index)
+            else:
+                return self.get_proposal_from_file(index)
+        else:
+            raise NotImplementedError
 
-        return current_points, current_labels
         # return self.data, self.labels
+    
+    def get_rpn_sample(self, index):
+        """ Creates input for region proposal network. 
+
+        Args:
+            index (int): The index of the point cloud instance. 
+        """
+        pts_lidar = self.get_lidar(index)
+        pts_intensity = pts_lidar[:, 3]
+
 
 
 
 if __name__ == '__main__':
+    pass
     # dataset = ShapeNetDataset(
     #     root=opt.dataset,
     #     classification=False,

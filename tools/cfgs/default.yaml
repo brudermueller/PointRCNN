@@ -68,7 +68,7 @@ RCNN:
     ENABLED: True
 
     # config of input
-    ROI_SAMPLE_JIT: True
+    ROI_SAMPLE_JIT: True # if true: sample the RoIs and calculate their GTs in the GPU
     REG_AUG_METHOD: multiple  # multiple, single, normal
     ROI_FG_AUG_TIMES: 10
 
@@ -123,21 +123,22 @@ RCNN:
 
     # config of testing
     SCORE_THRESH: 0.3
-    NMS_THRESH: 0.1
+    NMS_THRESH: 0.1 # non maximum suppression  
 
 # general training config
 TRAIN:
     SPLIT: train
     VAL_SPLIT: smallval
 
-    LR: 0.002
-    LR_CLIP: 0.00001
+    LR: 0.002 # learning rate 
+    LR_CLIP: 0.00001I a
     LR_DECAY: 0.5
     DECAY_STEP_LIST: [100, 150, 180, 200]
     LR_WARMUP: True
     WARMUP_MIN: 0.0002
     WARMUP_EPOCH: 1
 
+    # BN = Batch normalization 
     BN_MOMENTUM: 0.1
     BN_DECAY: 0.5
     BNM_CLIP: 0.01

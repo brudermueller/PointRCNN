@@ -105,6 +105,7 @@ class KittiRCNNDataset(KittiDataset):
         self.logger.info('Loading %s samples from %s ...' % (self.mode, self.label_dir))
         for idx in range(0, self.num_sample):
             sample_id = int(self.image_idx_list[idx])
+            # discard objects from classes to be ignored 
             obj_list = self.filtrate_objects(self.get_label(sample_id))
             if len(obj_list) == 0:
                 # self.logger.info('No gt classes: %06d' % sample_id)
@@ -286,7 +287,7 @@ class KittiRCNNDataset(KittiDataset):
 
         # generate inputs
         if self.mode == 'TRAIN' or self.random_select:
-            if self.npoints < len(pts_rect):
+            if self.npoints < len(pts_rect): # downsample points 
                 pts_depth = pts_rect[:, 2]
                 pts_near_flag = pts_depth < 40.0
                 far_idxs_choice = np.where(pts_near_flag == 0)[0]
@@ -298,7 +299,7 @@ class KittiRCNNDataset(KittiDataset):
                 np.random.shuffle(choice)
             else:
                 choice = np.arange(0, len(pts_rect), dtype=np.int32)
-                if self.npoints > len(pts_rect):
+                if self.npoints > len(pts_rect): # upsample points by randomly doubling existent points
                     extra_choice = np.random.choice(choice, self.npoints - len(pts_rect), replace=False)
                     choice = np.concatenate((choice, extra_choice), axis=0)
                 np.random.shuffle(choice)
@@ -324,6 +325,7 @@ class KittiRCNNDataset(KittiDataset):
             sample_info['pts_features'] = ret_pts_features
             return sample_info
 
+        # prepare 3d ground truth bound boxes 
         gt_obj_list = self.filtrate_objects(self.get_label(sample_id))
         if cfg.GT_AUG_ENABLED and self.mode == 'TRAIN' and gt_aug_flag:
             gt_obj_list.extend(extra_gt_obj_list)

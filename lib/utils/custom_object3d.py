@@ -1,5 +1,7 @@
+import numpy as np 
 
-class Object3d(object):
+
+class CustomObject3d(object):
     def __init__(self, bbox_array): 
         #bbox: (array of length 7) [x, y, z, h, w, l, ry]
         self.centroid = bbox[0:3]

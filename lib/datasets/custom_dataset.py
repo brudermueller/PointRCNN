@@ -10,28 +10,17 @@ import torch
 from torch.utils.data import Dataset
 
 import lib.utils.custom_data_utils as data_utils
+import lib.utils.custom_object3d as object3d
+import lib.utils.kitti_utils as kitti_utils
 import lib.utils.roipool3d.roipool3d_utils as roipool3d_utils
 from lib.config import cfg
 
 # DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../data/custom_data/")
 
-def shuffle_data(data, labels):
-    """ Shuffle data and labels.
-        
-        Args: 
-            data [numpy array]: B,N,... 
-            label [numpy array]: B,... 
-        Returns:
-            shuffled data, label and shuffle indices
-    """
-    idx = np.arange(len(labels))
-    np.random.shuffle(idx)
-    return self.data[idx, ...], self.labels[idx], idx
-
 
 class CustomRCNNDataset(Dataset): 
     def __init__(self, root, num_points, split='train', mode='TRAIN', batch_size=10, normalize=False, 
-                intensity_channel=True, shuffle=True, rcnn_training_roi_dir=None, 
+                random_select=True, logger=None, intensity_channel=True, rcnn_training_roi_dir=None, 
                 rcnn_training_feature_dir=None, rcnn_eval_roi_dir=None,
                 rcnn_eval_feature_dir=None): 
         """
@@ -40,10 +29,10 @@ class CustomRCNNDataset(Dataset):
         :param num_points: number of points to process for each pointcloud (needs to be the same)
         :param normalize: whether include the normalized coords in features (default: False)
         :param intensity_channel: whether to include the intensity value to xyz coordinates (default: True)
-        :param shuffle: whether to shuffle the data (default: True)
         """
         self.root = root
         self.split = split 
+        self.logger = logger
         self.num_points = num_points # TODO: define number of points to train with per frame
         self.batch_size = batch_size
         self.normalize = normalize
@@ -54,12 +43,6 @@ class CustomRCNNDataset(Dataset):
         
         # load all data files 
         self.all_files = data_utils.get_data_files(self.root, 'full_data.txt')
-        self.num_sample = self.all_files.__len__()
-        self.reset() # shuffle frames 
-        
-        #TODO: split data into test/training set 
-        self.split_dir = os.path.join(root, split + '.txt')
-        self.sample_list = data_utils.get_data_files(self.split_dir)
 
         # for rcnn training
         self.rcnn_training_bbox_list = []
@@ -75,85 +58,71 @@ class CustomRCNNDataset(Dataset):
         assert mode in ['TRAIN', 'EVAL', 'TEST'], 'Invalid mode: %s' % mode
         self.mode = mode
 
-        # initialize ground truth database 
-        self.gt_database = None
-
+        self.random_select = random_select
         if not self.random_select:
             self.logger.warning('random select is False')
 
         # TODO: create batches 
 
-        # Stage 1: Region Proposal Network
+        # Stage 1: Region Proposal Network (RPN)
+        # Stage 2: box proposal refinement subnetwork (RCNN)
+
         if cfg.RPN.ENABLED:
-            if mode == 'TRAIN':
-                self.preprocess_rpn_training_data()
-            else:
-                # self.sample_id_list = [int(sample_id) for sample_id in self.image_idx_list]
-                self.logger.info('Load testing samples from %s' % self.split_dir)
-                self.logger.info('Done: total test samples %d' % len(self.sample_list))
-        # Stage 2: box proposal refinement subnetwork 
-        elif cfg.RCNN.ENABLED:
-            pass
-
-
-    def reset(self):
-        ''' reset order of file list to shuffle them'''
-        self.file_idxs = np.arange(0, len(self.all_files))
-        if self.shuffle:
-            np.random.shuffle(self.file_idxs)
-        self.current_data = None
-        self.current_label = None
-        self.current_file_idx = 0
-        self.batch_idx = 0
-
-    def generate_gt_database(self):
-        #TODO: move to own GTDatabaseGenerator Class 
-        self.gt_database = []
-        for idx, sample in enumerate(self.sample_list):
-            path = os.path.join(self.root, sample)
-            data, labels, bboxes = data_utils.load_h5(path, bbox=True)  
-            pts_lidar = data[:,:3]
-            if self.intensity_channel:
-                pts_intensity = data[:, 4]
-
-            #bbox defined as: (N, 7) [x, y, z, h, w, l, ry]
-            gt_boxes3d = np.zeros((bboxes.__len__(), 7), dtype=np.float32)
-            for k, bbox in enumerate(bboxes):
-                centroid, h, w, l, angle = bbox[0:3], bbox[3], bbox[4], bbox[5], bbox[6] 
-                gt_boxes3d[k, 0:3], gt_boxes3d[k, 3], gt_boxes3d[k, 4], gt_boxes3d[k, 5], gt_boxes3d[k, 6] \
-                        = centroid, h, w, l, angle
-
-            if gt_boxes3d.__len__() == 0:
-                print('No gt object')
-            continue
+            # initialize ground truth database (needed for data augmentation)
+            if gt_database_dir is not None: 
+                logger.info('Loading gt_database(%d) from %s' % (len(self.gt_database), gt_database_dir))
+                self.gt_database = pickle.load(open(gt_database_dir, 'rb'))
             
+        # load samples to work with (depending on train/test/val mode)
+        self.logger.info('Load samples from %s' % self.split_dir)
+        self.split_dir = os.path.join(root, split + '.txt')
+        self.current_samples = data_utils.get_data_files(self.split_dir)
+        # self.sample_id_list = [int(sample_id) for sample_id in self.image_idx_list]
+        self.num_sample = self.all_files.__len__()
+        self.logger.info('Done: total {}-samples {}'.format(self.split, len(self.current_samples)))
 
-    def create_train_test_split(self): 
-        #TODO 
-        if self.shuffle:
-            self.current_data, self.current_label, _ = shuffle_data(self.current_data,self.current_label)
+    def get_lidar(self, frame):        
+        """ Returns lidar point data loaded from h5 file in form of (N,4).
 
-    
-    def get_lidar(self, idx):
-        # randomly subsample points 
-        #TODO: this only works if there are enough points --> elaborate more on how to select/upsample points
-        #      maybe change from random sampling to farthest point sampling 
+        Args:
+            frame (string): frame name/id 
+        """
+        lidar_file = os.path.join(self.root, frame)
+        assert os.path.exists(lidar_file)
+        pts, _ = data_utils.load_h5(lidar_file)
+        return pts
 
-        pt_idxs = np.arange(0, self.num_points)
-        np,random.shuffle(pt_idxs)
-        current_points = torch.from_numpy(self.data[index, pt_idxs].copy()).float()
-        return current_points
+    def get_label(self, frame):
+        """ Returns point labels for each point in lidar data loaded from h5 file in form of (N,1).
 
-    def get_label(self, sample_id, pt_idx):
-        current_labels = torch.from_numpy(self.labels[index, pt_idxs].copy()).long()
-        raise NotImplementedError    
+        Args:
+            frame (string): frame name/id 
+        """
+        lidar_file = os.path.join(self.root, frame)
+        assert os.path.exists(lidar_file)
+        _, labels = data_utils.load_h5(lidar_file)
+        return np.reshape(labels, (-1,1))
+
+    def get_bbox_label(self, frame):
+        """ Return bbox annotations per frame, defined as (N,7), i.e. (N x [x, y, z, h, w, l, ry])
+
+        Args:
+            frame (string): frame name/id 
+        """
+        lidar_file = os.path.join(self.root, frame)
+        assert os.path.exists(lidar_file)
+        # point labels not used here, bboxes instead 
+        _, _, bbox = data_utils.load_h5(lidar_file, bbox=True)
+        # transform single bbox annotation in list for compability reasons (dataset can be extended with >1 bboxes per frame)
+        bbox_list = np.reshape(bbox, (1,-1)) 
+        return bbox_list
 
     def __len__(self):
         if cfg.RPN.ENABLED:
-            return len(self.sample_list)
+            return len(self.current_samples)
         elif cfg.RCNN.ENABLED:
             if self.mode == 'TRAIN':
-                return len(self.sample_list)
+                return len(self.current_samples)
             else:
                 return len(self.image_idx_list)
         else:
@@ -175,25 +144,64 @@ class CustomRCNNDataset(Dataset):
             raise NotImplementedError
     
     def get_rpn_sample(self, index):
-        """ Creates input for region proposal network. 
+        """ Prepare input for region proposal network. 
 
         Args:
-            index (int): The index of the point cloud instance. 
+            index (int): The index of the point cloud instance, i.e. the corresp. frame. 
         """
         pts_lidar = self.get_lidar(index)
-        pts_intensity = pts_lidar[:, 3]
+        labels = self.get_label(index)
+        if self.intensity_channel:
+            pts_intensity = pts_lidar[:, 3].reshape(-1,1)
+        
+        sample_info = {'sample_id': index, 'random_select': self.random_select}
 
+        # generate inputs
+        pts_coor = pts_lidar[:,:3]
+        dist = np.sqrt(np.sum(pts_coor**2, axis=1,keepdims=True))
+        # print(dist)
+        if self.num_points < len(pts_lidar): # downsample points 
+            dist_flag = dist < 8.0 # initial value for cars was 40 -> choose smaller value for indoor setting 
+            far_inds = np.where(dist_flag == 0)[0]
+            near_inds = np.where(dist_flag == 1)[0]
+
+            near_inds_choice = np.random.choice(near_inds, self.n_sample_points - len(far_inds), replace=False)
+            choice = np.concatenate((near_inds_choice, far_inds), axis=0) if len(far_inds) > 0 else near_inds_choice
+            np.random.shuffle(choice)
+        else:
+            choice = np.arange(0, len(pts_lidar), dtype=np.int32)
+            if self.num_points > len(pts_lidar): # upsample points by randomly doubling existent points
+                extra_choice = np.random.choice(choice, self.n_sample_points - len(points), replace=False)
+                choice = np.concatenate((choice, extra_choice), axis=0)
+            np.random.shuffle(choice)
+        
+        pts_coor = pts_coor[choice,:]
+        pts_features = pts_intensity[choice,:]
+        
+        # prepare input
+        if cfg.RPN.USE_INTENSITY:
+            pts_input = np.concatenate((pts_coor, pts_features), axis=1)  # (N, C)
+        else:
+            pts_input = pts_coor
+        
+        sample_info['pts_input'] = pts_coor[choice,:]
+        sample_info['pts_features'] = pts_intensity[choice,:]
+        
+        # stop here if only testing 
+        if self.mode == 'TEST':    
+            return sample_info
+
+        # prepare 3d ground truth bound boxes 
+        gt_bbox_list = self.get_bbox_label(index)
+        gt_boxes3d = [object3d.Object3d(box_annot) for box_annot in gt_bbox_list]
+
+        #TODO: data augmentation
+        
+        sample_info['rpn_cls_label'] = (labels[choice,:]).astype(np.float32)  # 0:background, 1: pedestrian
+        sample_info['gt_boxes3d'] = gt_boxes3d
+        return sample_info 
 
 
 
 if __name__ == '__main__':
     pass
-    # dataset = ShapeNetDataset(
-    #     root=opt.dataset,
-    #     classification=False,
-    #     class_choice=[opt.class_choice])
-    # dataloader = torch.utils.data.DataLoader(
-    #     dataset,
-    #     batch_size=opt.batchSize,
-    #     shuffle=True,
-    #     num_workers=int(opt.workers))

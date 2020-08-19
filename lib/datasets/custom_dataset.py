@@ -93,7 +93,7 @@ class CustomRCNNDataset(Dataset):
             frame (string): frame id 
         """
         frame = self.current_samples[index]
-        print('++++++++ Frame {} +++++++++'.format(frame))
+        # print('++++++++ Frame {} +++++++++'.format(frame))
         lidar_file = os.path.join(self.root, frame)
         assert os.path.exists(lidar_file)
         pts, _ = data_utils.load_h5(lidar_file)
@@ -241,13 +241,13 @@ class CustomRCNNDataset(Dataset):
             # pixel offset of object center
             center3d = gt_boxes3d[k][0:3].copy()  # (x, y, z)
             center3d[1] -= gt_boxes3d[k][3] / 2
-            reg_label[fg_pt_flag, 0:3] = center3d - fg_pts_coor  # Now y is the true center of 3d box 20180928
+            reg_label[fg_pt_flag, 0:3] = center3d - fg_pts_coor  # Now y is the true center of 3d box 
 
             # size and angle encoding
             reg_label[fg_pt_flag, 3] = gt_boxes3d[k][3]  # h
             reg_label[fg_pt_flag, 4] = gt_boxes3d[k][4]  # w
             reg_label[fg_pt_flag, 5] = gt_boxes3d[k][5]  # l
-            reg_label[fg_pt_flag, 6] = gt_boxes3d[k][6]  # ry
+            reg_label[fg_pt_flag, 6] = gt_boxes3d[k][6]  # rz
 
         return cls_label, reg_label
 

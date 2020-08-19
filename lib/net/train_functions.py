@@ -12,7 +12,8 @@ def model_joint_fn_decorator():
 
     def model_fn(model, data):
         if cfg.RPN.ENABLED:
-            pts_rect, pts_features, pts_input = data['pts_rect'], data['pts_features'], data['pts_input']
+            # pts_rect = data['pts_rect']
+            pts_features, pts_input = data['pts_features'], data['pts_input']
             gt_boxes3d = data['gt_boxes3d']
 
             if not cfg.RPN.FIXED:

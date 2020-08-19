@@ -100,6 +100,43 @@ def boxes3d_to_corners3d(boxes3d, rotate=True):
 
     return corners.astype(np.float32)
 
+def boxes3d_to_corners3d_velodyne(boxes3d, rotate=True):
+    """
+    :param boxes3d: (N, 7) [x, y, z, h, w, l, ry]
+    :param rotate:
+    :return: corners3d: (N, 8, 3)
+    """
+
+    boxes_num = boxes3d.shape[0]
+    h, w, l = boxes3d[:, 3], boxes3d[:, 4], boxes3d[:, 5]
+    x_corners = np.array([w / 2., w / 2., -w / 2., -w / 2., w / 2., w / 2., -w / 2., -w / 2.], dtype=np.float32).T  # (N, 8)
+    y_corners = np.array([-l / 2., l / 2., l / 2., -l / 2., -l / 2., l / 2., l / 2., -l / 2.], dtype=np.float32).T  # (N, 8)
+
+    z_corners = np.zeros((boxes_num, 8), dtype=np.float32)
+    z_corners[:, 4:8] = (h/2).reshape(boxes_num, 1).repeat(4, axis=1)  # (N, 8)
+
+    if rotate:
+        rz = boxes3d[:, 6]
+        zeros, ones = np.zeros(rz.size, dtype=np.float32), np.ones(rz.size, dtype=np.float32)
+        rot_list = np.array([[np.cos(rz), -np.sin(rz), zeros],
+                             [np.sin(rz), np.cos(rz), zeros],
+                             [zeros, zeros,  ones]])  # (3, 3, N)
+        R_list = np.transpose(rot_list, (2, 0, 1))  # (N, 3, 3)
+
+        temp_corners = np.concatenate((x_corners.reshape(-1, 8, 1), y_corners.reshape(-1, 8, 1),
+                                       z_corners.reshape(-1, 8, 1)), axis=2)  # (N, 8, 3)
+        rotated_corners = np.matmul(temp_corners, R_list)  # (N, 8, 3)
+        x_corners, y_corners, z_corners = rotated_corners[:, :, 0], rotated_corners[:, :, 1], rotated_corners[:, :, 2]
+
+    x_loc, y_loc, z_loc = boxes3d[:, 0], boxes3d[:, 1], boxes3d[:, 2]
+
+    x = x_loc.reshape(-1, 1) + x_corners.reshape(-1, 8)
+    y = y_loc.reshape(-1, 1) + y_corners.reshape(-1, 8)
+    z = z_loc.reshape(-1, 1) + z_corners.reshape(-1, 8)
+
+    corners = np.concatenate((x.reshape(-1, 8, 1), y.reshape(-1, 8, 1), z.reshape(-1, 8, 1)), axis=2)
+
+    return corners.astype(np.float32)
 
 def boxes3d_to_corners3d_torch(boxes3d, flip=False):
     """
@@ -130,6 +167,36 @@ def boxes3d_to_corners3d_torch(boxes3d, flip=False):
     corners_rotated = corners_rotated.permute(0, 2, 1)
     return corners_rotated
 
+def boxes3d_to_corners3d_torch_veldoyne(boxes3d, flip=False):
+    """
+    Efficiently generate list of corner-lists of oriented bbox per bbox annotation/parameter set. 
+    Similar to generate_corners3d fct. in Object3D class but for N-dimensions in parallel.
+    :param boxes3d: (N, 7) [x, y, z, h, w, l, rz]
+    :return: corners_rotated: (N, 8, 3) in Velodyn coord. instead of camera coord. 
+    """
+    boxes_num = boxes3d.shape[0]
+    h, w, l, rz = boxes3d[:, 3], boxes3d[:, 4], boxes3d[:, 5], boxes3d[:, 6]
+    if flip:
+        rz = rz + np.pi
+    centers = boxes3d[:, 0:3]
+    zeros = torch.cuda.FloatTensor(boxes_num, 1).fill_(0)
+    ones = torch.cuda.FloatTensor(boxes_num, 1).fill_(1)
+
+    x_corners = torch.cat([w / 2., w / 2., -w / 2., -w / 2., w / 2., w / 2., -w / 2., -w / 2.], dim=1)  # (N, 8)
+    y_corners = torch.cat([-l / 2., l / 2., l / 2., -l / 2., -l / 2., l / 2., l / 2., -l / 2.], dim=1)  # (N, 8)
+    z_corners = torch.cat([zeros, zeros, zeros, zeros, h / 2., h / 2., h / 2., h / 2., h / 2.], dim=1)  # (N, 8)
+    corners = torch.cat((x_corners.unsqueeze(dim=1), y_corners.unsqueeze(dim=1), z_corners.unsqueeze(dim=1)), dim=1) # (N, 3, 8)
+
+    cosa, sina = torch.cos(rz), torch.sin(rz)
+    raw_1 = torch.cat([cosa, -sina, zeros], dim=1)
+    raw_2 = torch.cat([sina, cosa, zeros], dim=1)
+    raw_3 = torch.cat([zeros, zeros, ones], dim=1)
+    R = torch.cat((raw_1.unsqueeze(dim=1), raw_2.unsqueeze(dim=1), raw_3.unsqueeze(dim=1)), dim=1)  # (N, 3, 3)
+
+    corners_rotated = torch.matmul(R, corners)  # (N, 3, 8)
+    corners_rotated = corners_rotated + centers.unsqueeze(dim=2).expand(-1, -1, 8)
+    corners_rotated = corners_rotated.permute(0, 2, 1)
+    return corners_rotated
 
 def boxes3d_to_bev_torch(boxes3d):
     """
@@ -184,6 +251,12 @@ def objs_to_boxes3d(obj_list):
             = obj.pos, obj.h, obj.w, obj.l, obj.ry
     return boxes3d
 
+def objs_to_boxes3d_velodyne(obj_list):
+    boxes3d = np.zeros((obj_list.__len__(), 7), dtype=np.float32)
+    for k, obj in enumerate(obj_list):
+        boxes3d[k, 0:3], boxes3d[k, 3], boxes3d[k, 4], boxes3d[k, 5], boxes3d[k, 6] \
+            = obj.pos, obj.h, obj.w, obj.l, obj.rz
+    return boxes3d
 
 def objs_to_scores(obj_list):
     scores = np.zeros((obj_list.__len__()), dtype=np.float32)

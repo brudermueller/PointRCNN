@@ -13,6 +13,7 @@ from functools import partial
 from lib.net.point_rcnn import PointRCNN
 import lib.net.train_functions as train_functions
 from lib.datasets.kitti_rcnn_dataset import KittiRCNNDataset
+from lib.datasets.custom_dataset import CustomRCNNDataset
 from lib.config import cfg, cfg_from_file, save_config_to_file
 import tools.train_utils.train_utils as train_utils
 from tools.train_utils.fastai_optim import OptimWrapper
@@ -21,6 +22,7 @@ from tools.train_utils import learning_schedules_fastai as lsf
 
 parser = argparse.ArgumentParser(description="arg parser")
 parser.add_argument('--cfg_file', type=str, default='cfgs/default.yaml', help='specify the config for training')
+parser.add_argument('--dataset', type=str, default='kitti', required=True, help='sepcify the data to train the network with')
 parser.add_argument("--train_mode", type=str, default='rpn', required=True, help="specify the training mode")
 parser.add_argument("--batch_size", type=int, default=16, required=True, help="batch size for training")
 parser.add_argument("--epochs", type=int, default=200, required=True, help="Number of epochs to train for")
@@ -62,27 +64,48 @@ def create_dataloader(logger):
     DATA_PATH = os.path.join('../', 'data')
 
     # create dataloader
-    train_set = KittiRCNNDataset(root_dir=DATA_PATH, npoints=cfg.RPN.NUM_POINTS, split=cfg.TRAIN.SPLIT, mode='TRAIN',
-                                 logger=logger,
-                                 classes=cfg.CLASSES,
-                                 rcnn_training_roi_dir=args.rcnn_training_roi_dir,
-                                 rcnn_training_feature_dir=args.rcnn_training_feature_dir,
-                                 gt_database_dir=args.gt_database)
-    train_loader = DataLoader(train_set, batch_size=args.batch_size, pin_memory=True,
-                              num_workers=args.workers, shuffle=True, collate_fn=train_set.collate_batch,
-                              drop_last=True)
-
-    if args.train_with_eval:
-        test_set = KittiRCNNDataset(root_dir=DATA_PATH, npoints=cfg.RPN.NUM_POINTS, split=cfg.TRAIN.VAL_SPLIT, mode='EVAL',
+    if args.dataset == 'kitti': # load KITTI dataset 
+        train_set = KittiRCNNDataset(root_dir=DATA_PATH, npoints=cfg.RPN.NUM_POINTS, split=cfg.TRAIN.SPLIT, mode='TRAIN',
                                     logger=logger,
                                     classes=cfg.CLASSES,
-                                    rcnn_eval_roi_dir=args.rcnn_eval_roi_dir,
-                                    rcnn_eval_feature_dir=args.rcnn_eval_feature_dir)
-        test_loader = DataLoader(test_set, batch_size=1, shuffle=True, pin_memory=True,
-                                 num_workers=args.workers, collate_fn=test_set.collate_batch)
-    else:
-        test_loader = None
+                                    rcnn_training_roi_dir=args.rcnn_training_roi_dir,
+                                    rcnn_training_feature_dir=args.rcnn_training_feature_dir,
+                                    gt_database_dir=args.gt_database)
+        train_loader = DataLoader(train_set, batch_size=args.batch_size, pin_memory=True,
+                                num_workers=args.workers, shuffle=True, collate_fn=train_set.collate_batch,
+                                drop_last=True)
+
+        if args.train_with_eval:
+            test_set = KittiRCNNDataset(root_dir=DATA_PATH, npoints=cfg.RPN.NUM_POINTS, split=cfg.TRAIN.VAL_SPLIT, mode='EVAL',
+                                        logger=logger,
+                                        classes=cfg.CLASSES,
+                                        rcnn_eval_roi_dir=args.rcnn_eval_roi_dir,
+                                        rcnn_eval_feature_dir=args.rcnn_eval_feature_dir)
+            test_loader = DataLoader(test_set, batch_size=1, shuffle=True, pin_memory=True,
+                                    num_workers=args.workers, collate_fn=test_set.collate_batch)
+        else:
+            test_loader = None
+
+    elif args.dataset == 'custom': # load custom dataset 
+        train_set = CustomRCNNDataset(root=DATA_PATH, num_points=cfg.RPN.NUM_POINTS, split=cfg.TRAIN.SPLIT, mode='TRAIN', 
+                                     logger=logger)
+        # torch data loader for torch dataset 
+        train_loader = DataLoader(train_set, batch_size=args.batch_size, pin_memory=True,
+                                  num_workers=args.workers, shuffle=True, collate_fn=train_set.collate_batch,
+                                  drop_last=True)
+        if args.train_with_eval: # train with validation set for hyperparam tuning 
+            test_set = CustomRCNNDataset(root=DATA_PATH, num_points=cfg.RPN.NUM_POINTS, split='val', mode='EVAL',
+                                        logger=logger,
+                                        classes='Pedestrian')
+            test_loader = DataLoader(test_set, batch_size=1, shuffle=True, pin_memory=True,
+                                    num_workers=args.workers, collate_fn=test_set.collate_batch)
+        else:
+            test_loader = None
+    else: 
+        raise NotImplementedError
+    
     return train_loader, test_loader
+
 
 
 def create_optimizer(model):

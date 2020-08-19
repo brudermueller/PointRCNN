@@ -368,6 +368,7 @@ class KittiRCNNDataset(KittiDataset):
 
     @staticmethod
     def generate_rpn_training_labels(pts_rect, gt_boxes3d):
+        # regress bottom up 3d bounding box locations from foreground points 
         cls_label = np.zeros((pts_rect.shape[0]), dtype=np.int32)
         reg_label = np.zeros((pts_rect.shape[0], 7), dtype=np.float32)  # dx, dy, dz, ry, h, w, l
         gt_corners = kitti_utils.boxes3d_to_corners3d(gt_boxes3d, rotate=True)

@@ -41,12 +41,12 @@ def load_h5(h5_filename, bbox=False):
     return (data,label)
 
 
-def get_data_files(data_dir, filename):
+def get_data_files(data_dir):
     """ Retrieves a list from data_files to train/test with from a txt file.
 
     Args:
         data_dir (string): the path to the txt file
     """
-    data_files = [x.strip() for x in open(os.path.join(data_dir, filename)).readlines()]
+    data_files = [x.strip() for x in open(data_dir).readlines()]
     return data_files
 

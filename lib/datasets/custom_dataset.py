@@ -19,10 +19,10 @@ from lib.config import cfg
 
 
 class CustomRCNNDataset(Dataset): 
-    def __init__(self, root, num_points, split='train', mode='TRAIN', batch_size=10, normalize=False, 
+    def __init__(self, root, num_points, split='train', mode='TRAIN', 
                 random_select=True, logger=None, intensity_channel=True, rcnn_training_roi_dir=None, 
-                rcnn_training_feature_dir=None, rcnn_eval_roi_dir=None,
-                rcnn_eval_feature_dir=None): 
+                rcnn_training_feature_dir=None, rcnn_eval_roi_dir=None, rcnn_eval_feature_dir=None, 
+                gt_database_dir=None): # batch_size=10, normalize=False, 
         """
         :param root: directory path to the dataset
         :param split: 'train' or 'test'
@@ -30,19 +30,19 @@ class CustomRCNNDataset(Dataset):
         :param normalize: whether include the normalized coords in features (default: False)
         :param intensity_channel: whether to include the intensity value to xyz coordinates (default: True)
         """
-        self.root = root
+        self.root = os.path.join(root, 'custom_data')
         self.split = split 
         self.logger = logger
         self.num_points = num_points # TODO: define number of points to train with per frame
-        self.batch_size = batch_size
-        self.normalize = normalize
+        # self.batch_size = batch_size
+        # self.normalize = normalize
         self.intensity_channel = intensity_channel 
-        self.shuffle = shuffle
+        # self.shuffle = shuffle
         self.classes = ('Background', 'Pedestrian')
         self.num_class = self.classes.__len__()
         
         # load all data files 
-        self.all_files = data_utils.get_data_files(self.root, 'full_data.txt')
+        self.all_files = data_utils.get_data_files(os.path.join(self.root, 'full_data.txt'))
 
         # for rcnn training
         self.rcnn_training_bbox_list = []
@@ -74,41 +74,50 @@ class CustomRCNNDataset(Dataset):
                 self.gt_database = pickle.load(open(gt_database_dir, 'rb'))
             
         # load samples to work with (depending on train/test/val mode)
+        self.split_dir = os.path.join(self.root, split + '.txt')
         self.logger.info('Load samples from %s' % self.split_dir)
-        self.split_dir = os.path.join(root, split + '.txt')
         self.current_samples = data_utils.get_data_files(self.split_dir)
+        
+        # Create Mapping from sample frames to frame ids 
+        self.sample_id_list = [idx for idx in range(0, self.current_samples.__len__())]
+        self.num_sample = self.sample_id_list.__len__()
+
         # self.sample_id_list = [int(sample_id) for sample_id in self.image_idx_list]
         self.num_sample = self.all_files.__len__()
         self.logger.info('Done: total {}-samples {}'.format(self.split, len(self.current_samples)))
 
-    def get_lidar(self, frame):        
+    def get_lidar(self, index):        
         """ Returns lidar point data loaded from h5 file in form of (N,4).
 
         Args:
-            frame (string): frame name/id 
+            frame (string): frame id 
         """
+        frame = self.current_samples[index]
+        print('++++++++ Frame {} +++++++++'.format(frame))
         lidar_file = os.path.join(self.root, frame)
         assert os.path.exists(lidar_file)
         pts, _ = data_utils.load_h5(lidar_file)
         return pts
 
-    def get_label(self, frame):
+    def get_label(self, index):
         """ Returns point labels for each point in lidar data loaded from h5 file in form of (N,1).
 
         Args:
-            frame (string): frame name/id 
+            frame (string): frame id 
         """
+        frame = self.current_samples[index]
         lidar_file = os.path.join(self.root, frame)
         assert os.path.exists(lidar_file)
         _, labels = data_utils.load_h5(lidar_file)
         return np.reshape(labels, (-1,1))
 
-    def get_bbox_label(self, frame):
+    def get_bbox_label(self, index):
         """ Return bbox annotations per frame, defined as (N,7), i.e. (N x [x, y, z, h, w, l, ry])
 
         Args:
-            frame (string): frame name/id 
+            frame (string): frame id 
         """
+        frame = self.current_samples[index]
         lidar_file = os.path.join(self.root, frame)
         assert os.path.exists(lidar_file)
         # point labels not used here, bboxes instead 
@@ -149,12 +158,14 @@ class CustomRCNNDataset(Dataset):
         Args:
             index (int): The index of the point cloud instance, i.e. the corresp. frame. 
         """
-        pts_lidar = self.get_lidar(index)
-        labels = self.get_label(index)
+        sample_id = int(self.sample_id_list[index])
+
+        pts_lidar = self.get_lidar(sample_id)
+        labels = self.get_label(sample_id)
         if self.intensity_channel:
             pts_intensity = pts_lidar[:, 3].reshape(-1,1)
         
-        sample_info = {'sample_id': index, 'random_select': self.random_select}
+        sample_info = {'sample_id': sample_id, 'random_select': self.random_select}
 
         # generate inputs
         pts_coor = pts_lidar[:,:3]
@@ -165,13 +176,13 @@ class CustomRCNNDataset(Dataset):
             far_inds = np.where(dist_flag == 0)[0]
             near_inds = np.where(dist_flag == 1)[0]
 
-            near_inds_choice = np.random.choice(near_inds, self.n_sample_points - len(far_inds), replace=False)
+            near_inds_choice = np.random.choice(near_inds, self.num_points - len(far_inds), replace=False)
             choice = np.concatenate((near_inds_choice, far_inds), axis=0) if len(far_inds) > 0 else near_inds_choice
             np.random.shuffle(choice)
         else:
             choice = np.arange(0, len(pts_lidar), dtype=np.int32)
             if self.num_points > len(pts_lidar): # upsample points by randomly doubling existent points
-                extra_choice = np.random.choice(choice, self.n_sample_points - len(points), replace=False)
+                extra_choice = np.random.choice(choice, self.num_points - len(pts_lidar), replace=False)
                 choice = np.concatenate((choice, extra_choice), axis=0)
             np.random.shuffle(choice)
         
@@ -193,13 +204,102 @@ class CustomRCNNDataset(Dataset):
 
         # prepare 3d ground truth bound boxes 
         gt_bbox_list = self.get_bbox_label(index)
-        gt_boxes3d = [object3d.Object3d(box_annot) for box_annot in gt_bbox_list]
+        gt_obj_list = [object3d.CustomObject3d(box_annot) for box_annot in gt_bbox_list]
+        gt_boxes3d = kitti_utils.objs_to_boxes3d_velodyne(gt_obj_list)
 
         #TODO: data augmentation
-        
-        sample_info['rpn_cls_label'] = (labels[choice,:]).astype(np.float32)  # 0:background, 1: pedestrian
+
+        # generate training labels 
+        rpn_cls_label, rpn_reg_label = self.generate_rpn_training_labels(pts_coor, gt_boxes3d)
+        # rpn_cls_label = (labels[choice,:]).astype(np.float32)
+        rpn_reg_label = rpn_reg_label 
+        sample_info['rpn_cls_label'] =  rpn_cls_label # 0:background, 1: pedestrian
+        sample_info['rpn_reg_label'] = rpn_reg_label
         sample_info['gt_boxes3d'] = gt_boxes3d
         return sample_info 
+
+    @staticmethod
+    def generate_rpn_training_labels(pts_coor, gt_boxes3d):
+        # bottom up 3d bbox regression from foreground points during training
+        cls_label = np.zeros((pts_coor.shape[0]), dtype=np.int32)
+        reg_label = np.zeros((pts_coor.shape[0], 7), dtype=np.float32)  # dx, dy, dz, rz, h, w, l
+        gt_corners = kitti_utils.boxes3d_to_corners3d_velodyne(gt_boxes3d, rotate=True)
+        extend_gt_boxes3d = kitti_utils.enlarge_box3d(gt_boxes3d, extra_width=0.2)
+        extend_gt_corners = kitti_utils.boxes3d_to_corners3d_velodyne(extend_gt_boxes3d, rotate=True)
+        for k in range(gt_boxes3d.shape[0]):
+            box_corners = gt_corners[k]
+            fg_pt_flag = kitti_utils.in_hull(pts_coor, box_corners)
+            fg_pts_coor = pts_coor[fg_pt_flag]
+            cls_label[fg_pt_flag] = 1
+
+            # enlarge the bbox3d, ignore nearby points
+            extend_box_corners = extend_gt_corners[k]
+            fg_enlarge_flag = kitti_utils.in_hull(pts_coor, extend_box_corners)
+            ignore_flag = np.logical_xor(fg_pt_flag, fg_enlarge_flag)
+            cls_label[ignore_flag] = -1
+
+            # pixel offset of object center
+            center3d = gt_boxes3d[k][0:3].copy()  # (x, y, z)
+            center3d[1] -= gt_boxes3d[k][3] / 2
+            reg_label[fg_pt_flag, 0:3] = center3d - fg_pts_coor  # Now y is the true center of 3d box 20180928
+
+            # size and angle encoding
+            reg_label[fg_pt_flag, 3] = gt_boxes3d[k][3]  # h
+            reg_label[fg_pt_flag, 4] = gt_boxes3d[k][4]  # w
+            reg_label[fg_pt_flag, 5] = gt_boxes3d[k][5]  # l
+            reg_label[fg_pt_flag, 6] = gt_boxes3d[k][6]  # ry
+
+        return cls_label, reg_label
+
+    def collate_batch(self, batch): 
+        """ Merge list of samples to create mini-batch
+
+        Args:
+            batch ([type]): [description]
+        """
+        # testing 
+        if self.mode != 'TRAIN' and cfg.RCNN.ENABLED and not cfg.RPN.ENABLED:
+            assert batch.__len__() == 1
+            return batch[0]
+
+        batch_size = batch.__len__()
+        ans_dict = {}
+
+        for key in batch[0].keys():
+            if cfg.RPN.ENABLED and key == 'gt_boxes3d' or \
+                    (cfg.RCNN.ENABLED and cfg.RCNN.ROI_SAMPLE_JIT and key in ['gt_boxes3d', 'roi_boxes3d']):
+                max_gt = 0
+                for k in range(batch_size):
+                    max_gt = max(max_gt, batch[k][key].__len__())
+                batch_gt_boxes3d = np.zeros((batch_size, max_gt, 7), dtype=np.float32)
+                for i in range(batch_size):
+                    batch_gt_boxes3d[i, :batch[i][key].__len__(), :] = batch[i][key]
+                ans_dict[key] = batch_gt_boxes3d
+                continue
+
+            if isinstance(batch[0][key], np.ndarray):
+                if batch_size == 1:
+                    ans_dict[key] = batch[0][key][np.newaxis, ...]
+                else:
+                    ans_dict[key] = np.concatenate([batch[k][key][np.newaxis, ...] for k in range(batch_size)], axis=0)
+
+            else:
+                ans_dict[key] = [batch[k][key] for k in range(batch_size)]
+                if isinstance(batch[0][key], int):
+                    ans_dict[key] = np.array(ans_dict[key], dtype=np.int32)
+                elif isinstance(batch[0][key], float):
+                    ans_dict[key] = np.array(ans_dict[key], dtype=np.float32)
+
+        return ans_dict
+    
+    def get_rcnn_sample_jit(self, index):
+        raise NotImplementedError
+    
+    def get_rcnn_training_sample_batch(self, index):
+        raise NotImplementedError
+    
+    def get_proposal_from_file(self, index):
+        raise NotImplementedError
 
 
 

@@ -2,11 +2,11 @@ import numpy as np
 
 
 class CustomObject3d(object):
-    def __init__(self, bbox_array): 
+    def __init__(self, bbox): 
         #bbox: (array of length 7) [x, y, z, h, w, l, rz]
-        self.pos = bbox[0:3]
+        self.pos = np.array((float(bbox[0]), float(bbox[1]), float(bbox[2])), dtype=np.float32)
         self.h, self.w, self.l = float(bbox[3]), float(bbox[4]), float(bbox[5])
-        self.rz =  bbox[6]  # rotation angle around z-axis (instead of y as in camera coord.)
+        self.rz =  float(bbox[6])  # rotation angle around z-axis (instead of y as in camera coord.)
         self.dis_to_sensor = np.linalg.norm(self.pos)
         # According to KITTI definition
         self.cls_type = 'Pedestrian'
@@ -28,7 +28,7 @@ class CustomObject3d(object):
         # careful: width, length and height have been differently defined than in KITTI
         x_corners = [w / 2, w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2]        
         y_corners = [-l / 2, l / 2, l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2]
-        z_corners = [0, 0, 0, h / 2, h / 2, h / 2]
+        z_corners = [0, 0, 0, 0, h / 2, h / 2, h / 2, h / 2]
 
         # rotation now defined in Velodyne coords. -> around z-axis => yaw rot. 
         R = np.array([[np.cos(self.rz), -np,sin(self.rz), 0],

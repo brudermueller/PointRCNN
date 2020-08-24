@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 import torch.nn.functional as F
 from lib.net.point_rcnn import PointRCNN
 from lib.datasets.kitti_rcnn_dataset import KittiRCNNDataset
+from lib.datasets.custom_dataset import CustomRCNNDataset
 import tools.train_utils.train_utils as train_utils
 from lib.utils.bbox_transform import decode_bbox_target
 from tools.kitti_object_eval_python.evaluate import evaluate as kitti_evaluate
@@ -27,6 +28,7 @@ np.random.seed(1024)  # set the same seed
 
 parser = argparse.ArgumentParser(description="arg parser")
 parser.add_argument('--cfg_file', type=str, default='cfgs/default.yml', help='specify the config for evaluation')
+parser.add_argument('--dataset', type=str, default='kitti', required=True, help='sepcify the data to train the network with')
 parser.add_argument("--eval_mode", type=str, default='rpn', required=True, help="specify the evaluation mode")
 
 parser.add_argument('--eval_all', action='store_true', default=False, help='whether to evaluate all checkpoints')
@@ -846,16 +848,21 @@ def create_dataloader(logger):
     DATA_PATH = os.path.join('..', 'data')
 
     # create dataloader
-    test_set = KittiRCNNDataset(root_dir=DATA_PATH, npoints=cfg.RPN.NUM_POINTS, split=cfg.TEST.SPLIT, mode=mode,
-                                random_select=args.random_select,
-                                rcnn_eval_roi_dir=args.rcnn_eval_roi_dir,
-                                rcnn_eval_feature_dir=args.rcnn_eval_feature_dir,
-                                classes=cfg.CLASSES,
-                                logger=logger)
+    if args.dataset == 'kitti': # load KITTI dataset 
+        test_set = KittiRCNNDataset(root_dir=DATA_PATH, npoints=cfg.RPN.NUM_POINTS, split=cfg.TEST.SPLIT, mode=mode,
+                                    random_select=args.random_select,
+                                    rcnn_eval_roi_dir=args.rcnn_eval_roi_dir,
+                                    rcnn_eval_feature_dir=args.rcnn_eval_feature_dir,
+                                    classes=cfg.CLASSES,
+                                    logger=logger)
 
+    elif args.dataset == 'custom': # load custom dataset 
+        test_set = CustomRCNNDataset(root=DATA_PATH, num_points=cfg.RPN.NUM_POINTS, split='val', mode='EVAL',
+                                     logger=logger)
+    
     test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False, pin_memory=True,
                              num_workers=args.workers, collate_fn=test_set.collate_batch)
-
+                            
     return test_loader
 
 

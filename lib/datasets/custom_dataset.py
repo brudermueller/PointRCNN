@@ -82,8 +82,7 @@ class CustomRCNNDataset(Dataset):
         self.sample_id_list = [idx for idx in range(0, self.current_samples.__len__())]
         self.num_sample = self.sample_id_list.__len__()
 
-        # self.sample_id_list = [int(sample_id) for sample_id in self.image_idx_list]
-        self.num_sample = self.all_files.__len__()
+        # self.num_sample = self.all_files.__len__()
         self.logger.info('Done: total {}-samples {}'.format(self.split, len(self.current_samples)))
 
     def get_lidar(self, index):        
@@ -171,38 +170,40 @@ class CustomRCNNDataset(Dataset):
         pts_coor = pts_lidar[:,:3]
         dist = np.sqrt(np.sum(pts_coor**2, axis=1,keepdims=True))
         # print(dist)
-        if self.num_points < len(pts_lidar): # downsample points 
-            dist_flag = dist < 8.0 # initial value for cars was 40 -> choose smaller value for indoor setting 
-            far_inds = np.where(dist_flag == 0)[0]
-            near_inds = np.where(dist_flag == 1)[0]
+        if self.mode == "TRAIN" or self.random_select: 
+            if self.num_points < len(pts_lidar): # downsample points 
+                dist_flag = dist < 8.0 # initial value for cars was 40 -> choose smaller value for indoor setting 
+                far_inds = np.where(dist_flag == 0)[0]
+                near_inds = np.where(dist_flag == 1)[0]
 
-            near_inds_choice = np.random.choice(near_inds, self.num_points - len(far_inds), replace=False)
-            choice = np.concatenate((near_inds_choice, far_inds), axis=0) if len(far_inds) > 0 else near_inds_choice
-            np.random.shuffle(choice)
-        else:
-            choice = np.arange(0, len(pts_lidar), dtype=np.int32)
-            if self.num_points > len(pts_lidar): # upsample points by randomly doubling existent points
-                extra_choice = np.random.choice(choice, self.num_points - len(pts_lidar), replace=False)
-                choice = np.concatenate((choice, extra_choice), axis=0)
-            np.random.shuffle(choice)
-        
-        pts_coor = pts_coor[choice,:]
-        pts_features = pts_intensity[choice,:]
-        
+                near_inds_choice = np.random.choice(near_inds, self.num_points - len(far_inds), replace=False)
+                choice = np.concatenate((near_inds_choice, far_inds), axis=0) if len(far_inds) > 0 else near_inds_choice
+                np.random.shuffle(choice)
+            else:
+                choice = np.arange(0, len(pts_lidar), dtype=np.int32)
+                if self.num_points > len(pts_lidar): # upsample points by randomly doubling existent points
+                    extra_choice = np.random.choice(choice, self.num_points - len(pts_lidar), replace=False)
+                    choice = np.concatenate((choice, extra_choice), axis=0)
+                np.random.shuffle(choice)
+            
+            pts_coor = pts_coor[choice,:]
+            pts_features = pts_intensity[choice,:]
+  
         # prepare input
         if cfg.RPN.USE_INTENSITY:
             pts_input = np.concatenate((pts_coor, pts_features), axis=1)  # (N, C)
         else:
             pts_input = pts_coor
         
-        sample_info['pts_input'] = pts_coor[choice,:]
+        sample_info['pts_input'] = pts_input
+        sample_info['pts_rect'] = pts_input
         sample_info['pts_features'] = pts_intensity[choice,:]
         
         # stop here if only testing 
         if self.mode == 'TEST':    
             return sample_info
 
-        # prepare 3d ground truth bound boxes 
+        # prepare 3d ground truth bound boxes sss
         gt_bbox_list = self.get_bbox_label(index)
         gt_obj_list = [object3d.CustomObject3d(box_annot) for box_annot in gt_bbox_list]
         gt_boxes3d = kitti_utils.objs_to_boxes3d_velodyne(gt_obj_list)

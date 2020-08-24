@@ -41,7 +41,7 @@ class PointRCNN(nn.Module):
 
                     rpn_scores_raw = rpn_cls[:, :, 0]
                     rpn_scores_norm = torch.sigmoid(rpn_scores_raw)
-                    seg_mask = (rpn_scores_norm > cfg.RPN.SCORE_THRESH).float()
+                    seg_mask = (rpn_scores_norm > cfg.RPN.SCORE_THRESH).float() # predicted segmentation mask from stage 1 {0,1}
                     pts_depth = torch.norm(backbone_xyz, p=2, dim=2)
 
                     # proposal layer
@@ -51,11 +51,11 @@ class PointRCNN(nn.Module):
                     output['roi_scores_raw'] = roi_scores_raw
                     output['seg_result'] = seg_mask
 
-                rcnn_input_info = {'rpn_xyz': backbone_xyz,
-                                   'rpn_features': backbone_features.permute((0, 2, 1)),
-                                   'seg_mask': seg_mask,
-                                   'roi_boxes3d': rois,
-                                   'pts_depth': pts_depth}
+                rcnn_input_info = {'rpn_xyz': backbone_xyz,# point coordinates 
+                                   'rpn_features': backbone_features.permute((0, 2, 1)), # C-dim point feature rep. (PointNet)
+                                   'seg_mask': seg_mask, # segmentation mask 
+                                   'roi_boxes3d': rois, # regions of interest - bbox predictions
+                                   'pts_depth': pts_depth} # laser reflection value? 
                 if self.training:
                     rcnn_input_info['gt_boxes3d'] = input_data['gt_boxes3d']
 

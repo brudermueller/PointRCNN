@@ -16,7 +16,7 @@ GT_AUG_HARD_RATIO: 0.6
 
 PC_REDUCE_BY_RANGE: True
 PC_AREA_SCOPE: [[-40, 40], [-1,   3], [0, 70.4]]  # x, y, z scope in rect camera coords
-CLS_MEAN_SIZE: [[1.52563191462, 1.62856739989, 3.88311640418]]
+CLS_MEAN_SIZE: [[1.52563191462, 1.62856739989, 3.88311640418]] # anchor box size 
 
 
 # 1. config of rpn network
@@ -46,13 +46,13 @@ RPN:
               [[64, 64, 128], [64, 96, 128]],
               [[128, 196, 256], [128, 196, 256]],
               [[256, 256, 512], [256, 384, 512]]]
-    FP_MLPS: [[128, 128], [256, 256], [512, 512], [512, 512]]
+    FP_MLPS: [[128, 128], [256, 256], [512, 512], [512, 512]] # forward pass MLPs
     CLS_FC: [128]
-    REG_FC: [128]
-    DP_RATIO: 0.5
+    REG_FC: [128] # fully connected?
+    DP_RATIO: 0.5 # dropout 
 
     # config of training
-    LOSS_CLS: SigmoidFocalLoss
+    LOSS_CLS: SigmoidFocalLoss # {SigmoidFocalLoss, DiceLoss, BinaryCrossEntropy}
     FG_WEIGHT: 15
     FOCAL_ALPHA: [0.25, 0.75]
     FOCAL_GAMMA: 2.0

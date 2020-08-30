@@ -2,16 +2,21 @@ import torch
 import torch.nn as nn
 from pointnet2_lib.pointnet2.pointnet2_modules import PointnetFPModule, PointnetSAModuleMSG
 from lib.config import cfg
+import logging
 
+logging.getLogger(__name__).addHandler(logging.StreamHandler())
+cur_logger = logging.getLogger(__name__)
 
 def get_model(input_channels=6, use_xyz=True):
+    cur_logger.debug('=> Initializing model with {} channels'.format(input_channels))
     return Pointnet2MSG(input_channels=input_channels, use_xyz=use_xyz)
 
 
 class Pointnet2MSG(nn.Module):
     def __init__(self, input_channels=6, use_xyz=True):
         super().__init__()
-
+        
+        # Set abstraction layer 
         self.SA_modules = nn.ModuleList()
         channel_in = input_channels
 
@@ -23,8 +28,9 @@ class Pointnet2MSG(nn.Module):
                 mlps[idx] = [channel_in] + mlps[idx]
                 channel_out += mlps[idx][-1]
 
+            #PointNet Layer 
             self.SA_modules.append(
-                PointnetSAModuleMSG(
+                PointnetSAModuleMSG( # Multi Scale Grouping 
                     npoint=cfg.RPN.SA_CONFIG.NPOINTS[k],
                     radii=cfg.RPN.SA_CONFIG.RADIUS[k],
                     nsamples=cfg.RPN.SA_CONFIG.NSAMPLE[k],
@@ -46,7 +52,7 @@ class Pointnet2MSG(nn.Module):
 
     def _break_up_pc(self, pc):
         xyz = pc[..., 0:3].contiguous()
-        features = (
+        features = ( # intensity value if used else None
             pc[..., 3:].transpose(1, 2).contiguous()
             if pc.size(-1) > 3 else None
         )
@@ -54,7 +60,11 @@ class Pointnet2MSG(nn.Module):
         return xyz, features
 
     def forward(self, pointcloud: torch.cuda.FloatTensor):
+        cur_logger.debug('=> POINTNET++ Forward Pass')
+        cur_logger.debug('Pointcloud input: {}'.format(pointcloud.size()))
         xyz, features = self._break_up_pc(pointcloud)
+        feature_size = (features.size() if features else None)
+        cur_logger.debug('xyz: {}, features: {}'.format(xyz.size(), feature_size))
 
         l_xyz, l_features = [xyz], [features]
         for i in range(len(self.SA_modules)):

@@ -37,6 +37,12 @@ def decode_bbox_target(roi_box3d, pred_reg, loc_scope, loc_bin_size, num_head_bi
     :param get_ry_fine:
     :return:
     """
+    print('=================== Decode bbox input =================')
+    print('roibox3d input: {}'.format(roi_box3d))
+    print('type roibox: {}'.format(type(roi_box3d)))
+    print('pred_reg: {}'.format(pred_reg))
+    anchor_size = anchor_size.to(roi_box3d.get_device())
+    print('Anchor size: {}'.format(anchor_size))
     anchor_size = anchor_size.to(roi_box3d.get_device())
     per_loc_bin_num = int(loc_scope / loc_bin_size) * 2
     loc_y_bin_num = int(loc_y_scope / loc_y_bin_size) * 2

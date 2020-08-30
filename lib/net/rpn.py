@@ -1,22 +1,30 @@
 import torch.nn as nn
 import torch.nn.functional as F
+import torch
 import numpy as np
+import logging
 from lib.rpn.proposal_layer import ProposalLayer
 import pointnet2_lib.pointnet2.pytorch_utils as pt_utils
 import lib.utils.loss_utils as loss_utils
 from lib.config import cfg
 import importlib
 
+logging.getLogger(__name__).addHandler(logging.StreamHandler())
+cur_logger = logging.getLogger(__name__)
 
 class RPN(nn.Module):
     def __init__(self, use_xyz=True, mode='TRAIN'):
         super().__init__()
         self.training_mode = (mode == 'TRAIN')
+        
+        #configure backbone network 
+        cur_logger.debug('================= Region Proposal Network =================')
 
+        cur_logger.debug('----------- Loading backbone model: {} -----------\n'.format(cfg.RPN.BACKBONE))
         MODEL = importlib.import_module(cfg.RPN.BACKBONE)
         self.backbone_net = MODEL.get_model(input_channels=int(cfg.RPN.USE_INTENSITY), use_xyz=use_xyz)
 
-        # classification branch
+        # classification branch -> Foreground point segmentation 
         cls_layers = []
         pre_channel = cfg.RPN.FP_MLPS[0][-1]
         for k in range(0, cfg.RPN.CLS_FC.__len__()):
@@ -27,7 +35,7 @@ class RPN(nn.Module):
             cls_layers.insert(1, nn.Dropout(cfg.RPN.DP_RATIO))
         self.rpn_cls_layer = nn.Sequential(*cls_layers)
 
-        # regression branch
+        # regression branch -> Bounding Box regression 
         per_loc_bin_num = int(cfg.RPN.LOC_SCOPE / cfg.RPN.LOC_BIN_SIZE) * 2
         if cfg.RPN.LOC_XZ_FINE:
             reg_channel = per_loc_bin_num * 4 + cfg.RPN.NUM_HEAD_BIN * 2 + 3
@@ -45,6 +53,7 @@ class RPN(nn.Module):
             reg_layers.insert(1, nn.Dropout(cfg.RPN.DP_RATIO))
         self.rpn_reg_layer = nn.Sequential(*reg_layers)
 
+        # Configure Loss 
         if cfg.RPN.LOSS_CLS == 'DiceLoss':
             self.rpn_cls_loss_func = loss_utils.DiceLoss(ignore_target=-1)
         elif cfg.RPN.LOSS_CLS == 'SigmoidFocalLoss':
@@ -55,6 +64,7 @@ class RPN(nn.Module):
         else:
             raise NotImplementedError
 
+        # cur_logger.debug('=> Setting Proposal Layer with mode {}'.format(mode))
         self.proposal_layer = ProposalLayer(mode=mode)
         self.init_weights()
 
@@ -70,7 +80,11 @@ class RPN(nn.Module):
         :param input_data: dict (point_cloud)
         :return:
         """
-        pts_input = input_data['pts_input']
+        try: 
+            pts_input = input_data['pts_input']
+        except IndexError: 
+            pts_input = input_data # this is a special case for exporting the network to onnx format 
+        # B = batch size, C new dim of feature vec summarizing local context
         backbone_xyz, backbone_features = self.backbone_net(pts_input)  # (B, N, 3), (B, C, N)
 
         rpn_cls = self.rpn_cls_layer(backbone_features).transpose(1, 2).contiguous()  # (B, N, 1)
@@ -78,6 +92,13 @@ class RPN(nn.Module):
 
         ret_dict = {'rpn_cls': rpn_cls, 'rpn_reg': rpn_reg,
                     'backbone_xyz': backbone_xyz, 'backbone_features': backbone_features}
-
+        cur_logger.debug('------------')
+        cur_logger.debug('=> RPN forward pass: return-dict: \n')
+        for k, v in ret_dict.items():
+            cur_logger.debug('{}:{}'.format(k, v.size()))
+            if k == 'rpn_cls': 
+                cur_logger.debug(torch.min(v), torch.max(v))
+                cur_logger.debug(torch.unique(v))
+        cur_logger.debug('------------')
         return ret_dict
 

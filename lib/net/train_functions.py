@@ -50,7 +50,8 @@ def model_joint_fn_decorator():
             loss += rcnn_loss
 
         disp_dict['loss'] = loss.item()
-
+    
+        # print('===> MODEL RETURN TYPE {}'.format(type(ModelReturn)))
         return ModelReturn(loss, tb_dict, disp_dict)
 
     def get_rpn_loss(model, rpn_cls, rpn_reg, rpn_cls_label, rpn_reg_label, tb_dict):

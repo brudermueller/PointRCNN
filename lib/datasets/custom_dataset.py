@@ -6,6 +6,7 @@
 import os 
 import numpy as np 
 import pandas as pd 
+import pickle
 import torch
 from torch.utils.data import Dataset
 
@@ -22,13 +23,14 @@ class CustomRCNNDataset(Dataset):
     def __init__(self, root, num_points, split='train', mode='TRAIN', 
                 random_select=True, logger=None, intensity_channel=True, rcnn_training_roi_dir=None, 
                 rcnn_training_feature_dir=None, rcnn_eval_roi_dir=None, rcnn_eval_feature_dir=None, 
-                gt_database_dir=None): # batch_size=10, normalize=False, 
+                gt_database_dir=None, single_test_input=False): # batch_size=10, normalize=False, 
         """
         :param root: directory path to the dataset
         :param split: 'train' or 'test'
         :param num_points: number of points to process for each pointcloud (needs to be the same)
         :param normalize: whether include the normalized coords in features (default: False)
         :param intensity_channel: whether to include the intensity value to xyz coordinates (default: True)
+        :param single_test_input: try the network with just one single input frame (default: False)
         """
         self.root = os.path.join(root, 'custom_data')
         self.split = split 
@@ -74,7 +76,14 @@ class CustomRCNNDataset(Dataset):
                 self.gt_database = pickle.load(open(gt_database_dir, 'rb'))
             
         # load samples to work with (depending on train/test/val mode)
-        self.split_dir = os.path.join(self.root, split + '.txt')
+        if single_test_input: # this is for trying network architecture with single input frame 
+            if self.mode == 'TRAIN': 
+                self.split_dir = os.path.join(self.root, 'train_trial.txt')
+            elif self.mode == 'EVAL': 
+                self.split_dir = os.path.join(self.root, 'test_trial.txt')
+        else:
+            self.split_dir = os.path.join(self.root, split + '.txt')
+        
         self.logger.info('Load samples from %s' % self.split_dir)
         self.current_samples = data_utils.get_data_files(self.split_dir)
         

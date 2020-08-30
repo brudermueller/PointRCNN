@@ -11,6 +11,7 @@ class ProposalLayer(nn.Module):
         super().__init__()
         self.mode = mode
         self.MEAN_SIZE = torch.from_numpy(cfg.CLS_MEAN_SIZE[0]).cuda()
+        # print('Proposal Layer configures with mean size of anchor box: {}'.format(self.MEAN_SIZE))
 
     def forward(self, rpn_scores, rpn_reg, xyz):
         """
@@ -20,6 +21,7 @@ class ProposalLayer(nn.Module):
         :return bbox3d: (B, M, 7)
         """
         batch_size = xyz.shape[0]
+        # print('=> Forward Pass Proposal Layer: Batch_size = {} in proposal layer'.format(batch_size))
         proposals = decode_bbox_target(xyz.view(-1, 3), rpn_reg.view(-1, rpn_reg.shape[-1]),
                                        anchor_size=self.MEAN_SIZE,
                                        loc_scope=cfg.RPN.LOC_SCOPE,

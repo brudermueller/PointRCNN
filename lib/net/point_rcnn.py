@@ -30,7 +30,7 @@ class PointRCNN(nn.Module):
             with torch.set_grad_enabled((not cfg.RPN.FIXED) and self.training):
                 if cfg.RPN.FIXED:
                     self.rpn.eval()
-                rpn_output = self.rpn(input_data)
+                rpn_output = self.rpn(input_data) # dict with keys: 'rpn_cls', 'rpn_reg', 'backbone_xyz', 'backbone_features'
                 output.update(rpn_output)
 
             # rcnn inference
@@ -42,7 +42,8 @@ class PointRCNN(nn.Module):
                     rpn_scores_raw = rpn_cls[:, :, 0]
                     rpn_scores_norm = torch.sigmoid(rpn_scores_raw)
                     seg_mask = (rpn_scores_norm > cfg.RPN.SCORE_THRESH).float() # predicted segmentation mask from stage 1 {0,1}
-                    pts_depth = torch.norm(backbone_xyz, p=2, dim=2)
+                    # distance from sensor 
+                    pts_depth = torch.norm(backbone_xyz, p=2, dim=2) # p=order of norm, dim=if it is an int, vector norm will be calculated
 
                     # proposal layer
                     rois, roi_scores_raw = self.rpn.proposal_layer(rpn_scores_raw, rpn_reg, backbone_xyz)  # (B, M, 7)

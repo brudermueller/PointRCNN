@@ -3,7 +3,7 @@ import os
 import torch
 import torch.nn as nn
 from torch.nn.utils import clip_grad_norm_
-import tqdm
+import tqdm # tqdm(iterable) makes loops show progress bar 
 import torch.optim.lr_scheduler as lr_sched
 import math
 
@@ -70,8 +70,9 @@ def checkpoint_state(model=None, optimizer=None, epoch=None, it=None):
     return {'epoch': epoch, 'it': it, 'model_state': model_state, 'optimizer_state': optim_state}
 
 
-def save_checkpoint(state, filename='checkpoint'):
+def save_checkpoint(state, filename='checkpoint', logger=cur_logger):
     filename = '{}.pth'.format(filename)
+    logger.info('==> Saving checkpoint state at epoch {}, iteration {} under {}'.format(state['epoch'], state['it'], filename))
     torch.save(state, filename)
 
 
@@ -114,10 +115,10 @@ def load_part_ckpt(model, filename, logger=cur_logger, total_keys=-1):
 class Trainer(object):
     def __init__(self, model, model_fn, optimizer, ckpt_dir, lr_scheduler, bnm_scheduler,
                  model_fn_eval, tb_log, eval_frequency=1, lr_warmup_scheduler=None, warmup_epoch=-1,
-                 grad_norm_clip=1.0):
+                 grad_norm_clip=1.0, logger=cur_logger):
         self.model, self.model_fn, self.optimizer, self.lr_scheduler, self.bnm_scheduler, self.model_fn_eval = \
             model, model_fn, optimizer, lr_scheduler, bnm_scheduler, model_fn_eval
-
+        self.logger = logger
         self.ckpt_dir = ckpt_dir
         self.eval_frequency = eval_frequency
         self.tb_log = tb_log
@@ -129,6 +130,7 @@ class Trainer(object):
         self.model.train()
 
         self.optimizer.zero_grad()
+        # tb_dict = stats for tensorboard, disp_dict = stats to display while logging
         loss, tb_dict, disp_dict = self.model_fn(self.model, batch)
 
         loss.backward()
@@ -136,6 +138,31 @@ class Trainer(object):
         self.optimizer.step()
 
         return loss.item(), tb_dict, disp_dict
+
+    def save_net_for_visualization(self, batch_input, path):       
+        '''
+            Exports the pytorch model to a model in ONNX for better visualization with: https://github.com/lutzroeder/netron 
+            Args: 
+                batch_input: a batch from the train method for tracing in the network
+                path: path to folder in which to store the visualization 
+        '''
+
+        self.model.eval() # eval mode
+        # dummy_input = torch.from_numpy(batch_input['pts_input']).cuda(non_blocking=True).float()
+        dummy_input = batch_input['pts_input']
+
+        input_names = ['input']
+        output_names = ['output']
+        
+        # ONNX - Model
+        torch.onnx.export(self.model, dummy_input, "{}.onnx".format(path), verbose=True, input_names=input_names, output_names=output_names)
+        self.logger.info('Exported ONNX-Model to: {}.onnx'.format(path))
+
+        # PTH - Model
+        # torch.save(self.model.state_dict(), "{}{}.pth".format(path, file_name))
+        # self.handler.log('info', 'Exported PTH-Model to: {}{}.pth'.format(path, file_name))
+        
+        self.model.train() # back to training mode
 
     def eval_epoch(self, d_loader):
         self.model.eval()
@@ -148,7 +175,7 @@ class Trainer(object):
             self.optimizer.zero_grad()
 
             loss, tb_dict, disp_dict = self.model_fn_eval(self.model, data)
-
+            self.logger.debug('Evaluating data istance {}: \nloss: {}\ntb_dict: {} \ndisp_dict: {}\n '.format(i, loss, list(tb_dict.keys()), list(disp_dict.keys())))
             total_loss += loss.item()
             count += 1
             for k, v in tb_dict.items():
@@ -170,21 +197,25 @@ class Trainer(object):
     def train(self, start_it, start_epoch, n_epochs, train_loader, test_loader=None, ckpt_save_interval=5,
               lr_scheduler_each_iter=False):
         eval_frequency = self.eval_frequency if self.eval_frequency > 0 else 1
-
+        
+        self.logger.info('START TRAINING')
         it = start_it
         with tqdm.trange(start_epoch, n_epochs, desc='epochs') as tbar, \
                 tqdm.tqdm(total=len(train_loader), leave=False, desc='train') as pbar:
 
             for epoch in tbar:
+                self.logger.info('================= EPOCH {} ================='.format(epoch))
                 if self.lr_scheduler is not None and self.warmup_epoch <= epoch and (not lr_scheduler_each_iter):
                     self.lr_scheduler.step(epoch)
 
                 if self.bnm_scheduler is not None:
                     self.bnm_scheduler.step(it)
                     self.tb_log.add_scalar('bn_momentum', self.bnm_scheduler.lmbd(epoch), it)
-
+                
+                flag_train = False
                 # train one epoch
                 for cur_it, batch in enumerate(train_loader):
+                    self.logger.debug('++++++ Training Iteration {} ++++++'.format(cur_it))
                     if lr_scheduler_each_iter:
                         self.lr_scheduler.step(it)
                         cur_lr = float(self.optimizer.lr)
@@ -195,7 +226,7 @@ class Trainer(object):
                             cur_lr = self.lr_warmup_scheduler.get_lr()[0]
                         else:
                             cur_lr = self.lr_scheduler.get_lr()[0]
-
+                    flag_train = True
                     loss, tb_dict, disp_dict = self._train_it(batch)
                     it += 1
 
@@ -220,11 +251,17 @@ class Trainer(object):
                     save_checkpoint(
                         checkpoint_state(self.model, self.optimizer, trained_epoch, it), filename=ckpt_name,
                     )
+                    if flag_train: 
+                        batch_temp = batch 
+                        # TODO: does not work, fix for visualization 
+                        # self.save_net_for_visualization(batch_temp, ckpt_name) 
+                        flag_train = False
 
                 # eval one epoch
                 if (epoch % eval_frequency) == 0:
                     pbar.close()
                     if test_loader is not None:
+                        self.logger.debug('+++++++ Evaluate epoch ++++++++++\n')
                         with torch.set_grad_enabled(False):
                             val_loss, eval_dict, cur_performance = self.eval_epoch(test_loader)
 

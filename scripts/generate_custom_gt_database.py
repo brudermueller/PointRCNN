@@ -3,6 +3,8 @@ import numpy as np
 import pickle
 import torch
 
+from lib.utils import custom_data_utils
+
 """ 
 Generate a Ground Truth Database pickle file for data augmentation.  
 """
@@ -14,7 +16,7 @@ def generate_gt_database(self):
     self.gt_database = []
     for idx, sample in enumerate(self.current_samples):
         path = os.path.join(self.root, sample)
-        data, labels, bboxes = data_utils.load_h5(path, bbox=True)  
+        data, labels, bboxes = custom_data_utils.load_h5(path, bbox=True)  
         pts_lidar = data[:,:3]
         if self.intensity_channel:
             pts_intensity = data[:, 4]

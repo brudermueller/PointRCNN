@@ -23,6 +23,7 @@ from tools.train_utils import learning_schedules_fastai as lsf
 parser = argparse.ArgumentParser(description="arg parser")
 parser.add_argument('--cfg_file', type=str, default='cfgs/default.yaml', help='specify the config for training')
 parser.add_argument('--dataset', type=str, default='kitti', required=True, help='sepcify the data to train the network with')
+parser.add_argument('--single_input_test', type=bool, default=False, required=False, help='Try network with just a single input.')
 parser.add_argument("--train_mode", type=str, default='rpn', required=True, help="specify the training mode")
 parser.add_argument("--batch_size", type=int, default=16, required=True, help="batch size for training")
 parser.add_argument("--epochs", type=int, default=200, required=True, help="Number of epochs to train for")
@@ -52,9 +53,11 @@ args = parser.parse_args()
 
 def create_logger(log_file):
     log_format = '%(asctime)s  %(levelname)5s  %(message)s'
-    logging.basicConfig(level=logging.DEBUG, format=log_format, filename=log_file)
+    # logging.basicConfig(level=logging.DEBUG, format=log_format, filename=log_file)
+    logging.basicConfig(level=logging.INFO, format=log_format, filename=log_file)
     console = logging.StreamHandler()
-    console.setLevel(logging.DEBUG)
+    # console.setLevel(logging.DEBUG)
+    console.setLevel(logging.INFO)
     console.setFormatter(logging.Formatter(log_format))
     logging.getLogger(__name__).addHandler(console)
     return logging.getLogger(__name__)
@@ -62,7 +65,7 @@ def create_logger(log_file):
 
 def create_dataloader(logger):
     DATA_PATH = os.path.join('../', 'data')
-
+    logger.debug('=> Loading {} dataset'.format(args.dataset))
     # create dataloader
     if args.dataset == 'kitti': # load KITTI dataset 
         train_set = KittiRCNNDataset(root_dir=DATA_PATH, npoints=cfg.RPN.NUM_POINTS, split=cfg.TRAIN.SPLIT, mode='TRAIN',
@@ -88,7 +91,7 @@ def create_dataloader(logger):
 
     elif args.dataset == 'custom': # load custom dataset 
         train_set = CustomRCNNDataset(root=DATA_PATH, num_points=cfg.RPN.NUM_POINTS, split=cfg.TRAIN.SPLIT, mode='TRAIN', 
-                                     logger=logger)
+                                     logger=logger, single_test_input=args.single_input_test)
         # torch data loader for torch dataset 
         train_loader = DataLoader(train_set, batch_size=args.batch_size, pin_memory=True,
                                   num_workers=args.workers, shuffle=True, collate_fn=train_set.collate_batch,
@@ -96,7 +99,7 @@ def create_dataloader(logger):
         if args.train_with_eval: # train with validation set for hyperparam tuning 
             test_set = CustomRCNNDataset(root=DATA_PATH, num_points=cfg.RPN.NUM_POINTS, split='val', mode='EVAL',
                                         logger=logger,
-                                        classes='Pedestrian')
+                                        single_test_input=args.single_input_test)
             test_loader = DataLoader(test_set, batch_size=1, shuffle=True, pin_memory=True,
                                     num_workers=args.workers, collate_fn=test_set.collate_batch)
         else:
@@ -109,7 +112,6 @@ def create_dataloader(logger):
 
 
 def create_optimizer(model):
-
     if cfg.TRAIN.OPTIMIZER == 'adam':
         optimizer = optim.Adam(model.parameters(), lr=cfg.TRAIN.LR, weight_decay=cfg.TRAIN.WEIGHT_DECAY)
     elif cfg.TRAIN.OPTIMIZER == 'sgd':
@@ -216,6 +218,7 @@ if __name__ == "__main__":
     # create dataloader & network & optimizer
     train_loader, test_loader = create_dataloader(logger)
     model = PointRCNN(num_classes=train_loader.dataset.num_class, use_xyz=True, mode='TRAIN')
+    logger.debug(model)
     optimizer = create_optimizer(model)
 
     if args.mgpus:

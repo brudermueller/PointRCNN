@@ -36,7 +36,8 @@ RPN:
     # config of network structure
     BACKBONE: pointnet2_msg
     USE_BN: True
-    NUM_POINTS: 16384
+    # NUM_POINTS: 16384
+    NUM_POINTS: 8000
 
     SA_CONFIG:
         NPOINTS: [4096, 1024, 256, 64]
@@ -60,8 +61,7 @@ RPN:
     LOSS_WEIGHT: [1.0, 1.0]
     NMS_TYPE: normal
 
-    # config of testing
-    SCORE_THRESH: 0.3
+    SCORE_THRESH: 0.3 # thresh for segmentation mask
 
 # 2. config of rcnn network
 RCNN:

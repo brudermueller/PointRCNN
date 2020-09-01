@@ -29,4 +29,4 @@ def evaluate(label_path,
 
 
 if __name__ == '__main__':
-    fire.Fire()
+    fire.Fire() #generating command line interface 

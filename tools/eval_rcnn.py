@@ -68,30 +68,35 @@ def create_logger(log_file):
     return logging.getLogger(__name__)
 
 
-def save_kitti_format(sample_id, calib, bbox3d, kitti_output_dir, scores, img_shape):
-    corners3d = kitti_utils.boxes3d_to_corners3d(bbox3d)
-    img_boxes, _ = calib.corners3d_to_img_boxes(corners3d)
+def save_kitti_format(sample_id, bbox3d, kitti_output_dir, scores): # (sample_id, calib, bbox3d, kitti_output_dir, scores, img_shape))
+    corners3d = kitti_utils.boxes3d_to_corners3d_velodyne(bbox3d)
+    # img_boxes, _ = calib.corners3d_to_img_boxes(corners3d)
 
-    img_boxes[:, 0] = np.clip(img_boxes[:, 0], 0, img_shape[1] - 1)
-    img_boxes[:, 1] = np.clip(img_boxes[:, 1], 0, img_shape[0] - 1)
-    img_boxes[:, 2] = np.clip(img_boxes[:, 2], 0, img_shape[1] - 1)
-    img_boxes[:, 3] = np.clip(img_boxes[:, 3], 0, img_shape[0] - 1)
+    # img_boxes[:, 0] = np.clip(img_boxes[:, 0], 0, img_shape[1] - 1)
+    # img_boxes[:, 1] = np.clip(img_boxes[:, 1], 0, img_shape[0] - 1)
+    # img_boxes[:, 2] = np.clip(img_boxes[:, 2], 0, img_shape[1] - 1)
+    # img_boxes[:, 3] = np.clip(img_boxes[:, 3], 0, img_shape[0] - 1)
 
-    img_boxes_w = img_boxes[:, 2] - img_boxes[:, 0]
-    img_boxes_h = img_boxes[:, 3] - img_boxes[:, 1]
-    box_valid_mask = np.logical_and(img_boxes_w < img_shape[1] * 0.8, img_boxes_h < img_shape[0] * 0.8)
+    # img_boxes_w = img_boxes[:, 2] - img_boxes[:, 0]
+    # img_boxes_h = img_boxes[:, 3] - img_boxes[:, 1]
+    # box_valid_mask = np.logical_and(img_boxes_w < img_shape[1] * 0.8, img_boxes_h < img_shape[0] * 0.8)
 
     kitti_output_file = os.path.join(kitti_output_dir, '%06d.txt' % sample_id)
     with open(kitti_output_file, 'w') as f:
         for k in range(bbox3d.shape[0]):
-            if box_valid_mask[k] == 0:
-                continue
+            # if box_valid_mask[k] == 0:
+            #     continue
             x, z, ry = bbox3d[k, 0], bbox3d[k, 2], bbox3d[k, 6]
             beta = np.arctan2(z, x)
             alpha = -np.sign(beta) * np.pi / 2 + beta + ry
 
-            print('%s -1 -1 %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f' %
-                  (cfg.CLASSES, alpha, img_boxes[k, 0], img_boxes[k, 1], img_boxes[k, 2], img_boxes[k, 3],
+            # print('%s -1 -1 %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f' %
+            #       (cfg.CLASSES, alpha, img_boxes[k, 0], img_boxes[k, 1], img_boxes[k, 2], img_boxes[k, 3],
+            #        bbox3d[k, 3], bbox3d[k, 4], bbox3d[k, 5], bbox3d[k, 0], bbox3d[k, 1], bbox3d[k, 2],
+            #        bbox3d[k, 6], scores[k]), file=f)
+
+            print('%s -1 -1 %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f' %
+                  (cfg.CLASSES,
                    bbox3d[k, 3], bbox3d[k, 4], bbox3d[k, 5], bbox3d[k, 0], bbox3d[k, 1], bbox3d[k, 2],
                    bbox3d[k, 6], scores[k]), file=f)
 
@@ -121,7 +126,9 @@ def eval_one_epoch_rpn(model, dataloader, epoch_id, result_dir, logger):
         os.makedirs(kitti_features_dir, exist_ok=True)
 
     if args.save_result or args.save_rpn_feature:
+        logger.info('==> SAVING RESULTS')
         kitti_output_dir = os.path.join(result_dir, 'detections', 'data')
+        logger.info('Kitti outputdir {}'.format(kitti_output_dir))
         seg_output_dir = os.path.join(result_dir, 'seg_result')
         os.makedirs(kitti_output_dir, exist_ok=True)
         os.makedirs(seg_output_dir, exist_ok=True)
@@ -142,14 +149,16 @@ def eval_one_epoch_rpn(model, dataloader, epoch_id, result_dir, logger):
         sample_id = sample_id_list[0]
         cnt += len(sample_id_list)
 
-        if not args.test:
+        if not args.test: # evaluate with ground truth 
             rpn_cls_label, rpn_reg_label = data['rpn_cls_label'], data['rpn_reg_label']
             gt_boxes3d = data['gt_boxes3d']
+            logger.debug('==> Evaluating with ground truth: {}'.format(gt_boxes3d))
 
             rpn_cls_label = torch.from_numpy(rpn_cls_label).cuda(non_blocking=True).long()
             if gt_boxes3d.shape[1] == 0:  # (B, M, 7)
+                logger.info('%06d: No gt box' % sample_id)
                 pass
-                # logger.info('%06d: No gt box' % sample_id)
+
             else:
                 gt_boxes3d = torch.from_numpy(gt_boxes3d).cuda(non_blocking=True).float()
 
@@ -226,10 +235,12 @@ def eval_one_epoch_rpn(model, dataloader, epoch_id, result_dir, logger):
                 np.save(output_file, output_data.astype(np.float16))
 
                 # save as kitti format
-                calib = dataset.get_calib(cur_sample_id)
+                # calib = dataset.get_calib(cur_sample_id)
                 cur_boxes3d = cur_boxes3d.cpu().numpy()
-                image_shape = dataset.get_image_shape(cur_sample_id)
-                save_kitti_format(cur_sample_id, calib, cur_boxes3d, kitti_output_dir, cur_scores_raw, image_shape)
+                # image_shape = dataset.get_image_shape(cur_sample_id)
+                # save_kitti_format(cur_sample_id, calib, cur_boxes3d, kitti_output_dir, cur_scores_raw, image_shape)
+                save_kitti_format(cur_sample_id, cur_boxes3d, kitti_output_dir, cur_scores_raw)
+
 
         disp_dict = {'mode': mode, 'recall': '%d/%d' % (total_recalled_bbox_list[3], total_gt_bbox),
                      'rpn_iou': rpn_iou_avg / max(cnt, 1.0)}
@@ -731,7 +742,14 @@ def load_ckpt_based_on_args(model, logger):
 def eval_single_ckpt(root_result_dir):
     root_result_dir = os.path.join(root_result_dir, 'eval')
     # set epoch_id and output dir
-    num_list = re.findall(r'\d+', args.ckpt) if args.ckpt is not None else []
+    if args.ckpt: 
+        num_list = re.findall(r'\d+', args.ckpt) 
+    elif args.rpn_ckpt: 
+        path = args.rpn_ckpt
+        num_list = re.sub('\.pth$', '', path).split('_')[-1]
+    else: 
+        num_list = []
+    
     epoch_id = num_list[-1] if num_list.__len__() > 0 else 'no_number'
     root_result_dir = os.path.join(root_result_dir, 'epoch_%s' % epoch_id, cfg.TEST.SPLIT)
     if args.test:
@@ -750,7 +768,7 @@ def eval_single_ckpt(root_result_dir):
 
     # create dataloader & network
     test_loader = create_dataloader(logger)
-    model = PointRCNN(num_classes=test_loader.dataset.num_class, use_xyz=True, mode='TEST')
+    model = PointRCNN(num_classes=test_loader.dataset.num_class, use_xyz=True, mode='TEST', logger=logger)
     model.cuda()
 
     # copy important files to backup

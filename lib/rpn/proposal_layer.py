@@ -65,7 +65,7 @@ class ProposalLayer(nn.Module):
         :param proposals: (N, 7)
         :param order: (N)
         """
-        nms_range_list = [0, 40.0, 80.0]
+        nms_range_list = [0, 40.0, 80.0] #TODO: to be extended for 360 degreees with negative values 
         pre_tot_top_n = cfg[self.mode].RPN_PRE_NMS_TOP_N
         pre_top_n_list = [0, int(pre_tot_top_n * 0.7), pre_tot_top_n - int(pre_tot_top_n * 0.7)]
         post_tot_top_n = cfg[self.mode].RPN_POST_NMS_TOP_N

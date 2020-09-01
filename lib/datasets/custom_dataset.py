@@ -135,16 +135,8 @@ class CustomRCNNDataset(Dataset):
         return bbox_list
 
     def __len__(self):
-        if cfg.RPN.ENABLED:
-            return len(self.sample_id_list)
-        elif cfg.RCNN.ENABLED:
-            if self.mode == 'TRAIN':
-                #TODO: this needs to be changed (see KITTI Dataset)
-                return len(self.current_samples)
-            else:
-                return len(self.sanple_id_list)
-        else:
-            raise NotImplementedError
+        # TODO: validate this setting also for RCNN 
+        return len(self.sample_id_list)
 
     def __getitem__(self, index):
         # return self.data, self.labels
@@ -180,24 +172,29 @@ class CustomRCNNDataset(Dataset):
 
         # generate inputs
         pts_coor = pts_lidar[:,:3]
-        dist = np.sqrt(np.sum(pts_coor**2, axis=1,keepdims=True))
+        dist = np.linalg.norm(pts_lidar[:, 0:3], axis=1)
+        # dist = np.sqrt(np.sum(pts_coor**2, axis=1,keepdims=True))
         # print(dist)
         if self.mode == "TRAIN" or self.random_select: 
             if self.num_points < len(pts_lidar): # downsample points 
+                # flag for near points 
                 dist_flag = dist < 8.0 # initial value for cars was 40 -> choose smaller value for indoor setting 
                 far_inds = np.where(dist_flag == 0)[0]
                 near_inds = np.where(dist_flag == 1)[0]
 
                 near_inds_choice = np.random.choice(near_inds, self.num_points - len(far_inds), replace=False)
-                choice = np.concatenate((near_inds_choice, far_inds), axis=0) if len(far_inds) > 0 else near_inds_choice
-                np.random.shuffle(choice)
+                if self.num_points > len(far_inds): 
+                    choice = np.concatenate((near_inds_choice, far_inds), axis=0) if len(far_inds) > 0 else near_inds_choice
+                else: 
+                    choice = np.arange(0, len(self.num_points), dtype=np.int32)
+                    choice = np.random.choice(choice, self.num_points, replace=False)
             else:
                 choice = np.arange(0, len(pts_lidar), dtype=np.int32)
                 if self.num_points > len(pts_lidar): # upsample points by randomly doubling existent points
                     extra_choice = np.random.choice(choice, self.num_points - len(pts_lidar), replace=False)
                     choice = np.concatenate((choice, extra_choice), axis=0)
-                np.random.shuffle(choice)
             
+            np.random.shuffle(choice)
             pts_coor = pts_coor[choice,:]
             pts_features = [pts_intensity_norm[choice,:]]
             ret_pts_features = np.concatenate(pts_features, axis=1) if pts_features.__len__() > 1 else pts_features[0]

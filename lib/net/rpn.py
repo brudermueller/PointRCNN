@@ -97,14 +97,14 @@ class RPN(nn.Module):
                     'backbone_xyz': backbone_xyz, 'backbone_features': backbone_features}
         
         cur_logger.debug('------------')
-        cur_logger.info('=> RPN forward pass: return-dict: \n')
+        cur_logger.debug('=> RPN forward pass: return-dict: \n')
         for k, v in ret_dict.items():
-            cur_logger.info('{}:{}'.format(k, v.size()))
+            cur_logger.debug('{}:{}'.format(k, v.size()))
             if k == 'rpn_cls': 
                 cur_logger.debug(torch.min(v), torch.max(v))
                 cur_logger.debug(torch.unique(v))
             if k == 'rpn_reg': 
-                cur_logger.info('RPN reg decode box input: {}'.format(v.view(-1, v.shape[-1]).size()))
+                cur_logger.debug('RPN reg decode box input: {}'.format(v.view(-1, v.shape[-1]).size()))
         cur_logger.debug('------------')
         
         return ret_dict

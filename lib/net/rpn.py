@@ -23,8 +23,9 @@ class RPN(nn.Module):
         cur_logger.debug('----------- Loading backbone model: {} -----------\n'.format(cfg.RPN.BACKBONE))
         MODEL = importlib.import_module(cfg.RPN.BACKBONE)
         self.backbone_net = MODEL.get_model(input_channels=int(cfg.RPN.USE_INTENSITY), use_xyz=use_xyz)
-
+        # -----------------------------------------------------
         # classification branch -> Foreground point segmentation 
+        # -----------------------------------------------------
         cls_layers = []
         pre_channel = cfg.RPN.FP_MLPS[0][-1]
         for k in range(0, cfg.RPN.CLS_FC.__len__()):
@@ -35,7 +36,9 @@ class RPN(nn.Module):
             cls_layers.insert(1, nn.Dropout(cfg.RPN.DP_RATIO))
         self.rpn_cls_layer = nn.Sequential(*cls_layers)
 
+        # -----------------------------------------------------
         # regression branch -> Bounding Box regression 
+        # -----------------------------------------------------
         per_loc_bin_num = int(cfg.RPN.LOC_SCOPE / cfg.RPN.LOC_BIN_SIZE) * 2
         if cfg.RPN.LOC_XZ_FINE:
             reg_channel = per_loc_bin_num * 4 + cfg.RPN.NUM_HEAD_BIN * 2 + 3
@@ -92,13 +95,17 @@ class RPN(nn.Module):
 
         ret_dict = {'rpn_cls': rpn_cls, 'rpn_reg': rpn_reg,
                     'backbone_xyz': backbone_xyz, 'backbone_features': backbone_features}
+        
         cur_logger.debug('------------')
-        cur_logger.debug('=> RPN forward pass: return-dict: \n')
+        cur_logger.info('=> RPN forward pass: return-dict: \n')
         for k, v in ret_dict.items():
-            cur_logger.debug('{}:{}'.format(k, v.size()))
+            cur_logger.info('{}:{}'.format(k, v.size()))
             if k == 'rpn_cls': 
                 cur_logger.debug(torch.min(v), torch.max(v))
                 cur_logger.debug(torch.unique(v))
+            if k == 'rpn_reg': 
+                cur_logger.info('RPN reg decode box input: {}'.format(v.view(-1, v.shape[-1]).size()))
         cur_logger.debug('------------')
+        
         return ret_dict
 

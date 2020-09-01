@@ -134,6 +134,7 @@ class RCNNNet(nn.Module):
                     pts_extra_input_list = [input_data['seg_mask'].unsqueeze(dim=2)]
 
                 if cfg.RCNN.USE_DEPTH:
+                    # TODO: adjust 
                     pts_depth = input_data['pts_depth'] / 70.0 - 0.5
                     pts_extra_input_list.append(pts_depth.unsqueeze(dim=2))
                 pts_extra_input = torch.cat(pts_extra_input_list, dim=2)
@@ -148,6 +149,7 @@ class RCNNNet(nn.Module):
                 roi_center = batch_rois[:, :, 0:3]
                 pooled_features[:, :, :, 0:3] -= roi_center.unsqueeze(dim=2)
                 for k in range(batch_size):
+                    # TODO: adjust roation along z 
                     pooled_features[k, :, :, 0:3] = kitti_utils.rotate_pc_along_y_torch(pooled_features[k, :, :, 0:3],
                                                                                         batch_rois[k, :, 6])
 

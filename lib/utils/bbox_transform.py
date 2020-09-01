@@ -24,7 +24,8 @@ def rotate_pc_along_y_torch(pc, rot_angle):
 def decode_bbox_target(roi_box3d, pred_reg, loc_scope, loc_bin_size, num_head_bin, anchor_size,
                        get_xz_fine=True, get_y_by_bin=False, loc_y_scope=0.5, loc_y_bin_size=0.25, get_ry_fine=False):
     """
-    :param roi_box3d: (N, 7)
+    This function is used in both network stages (RPN and RCNN) in order to recover the 3D bounding boxes from regression. 
+    :param roi_box3d: (N, 7) for RCNN, (N,3) for RPN # backbone_xyz (coordinates of foreground points)
     :param pred_reg: (N, C)
     :param loc_scope:
     :param loc_bin_size:
@@ -37,15 +38,13 @@ def decode_bbox_target(roi_box3d, pred_reg, loc_scope, loc_bin_size, num_head_bi
     :param get_ry_fine:
     :return:
     """
-    print('=================== Decode bbox input =================')
-    print('roibox3d input: {}'.format(roi_box3d))
-    print('type roibox: {}'.format(type(roi_box3d)))
-    print('pred_reg: {}'.format(pred_reg))
-    anchor_size = anchor_size.to(roi_box3d.get_device())
-    print('Anchor size: {}'.format(anchor_size))
-    anchor_size = anchor_size.to(roi_box3d.get_device())
-    per_loc_bin_num = int(loc_scope / loc_bin_size) * 2
-    loc_y_bin_num = int(loc_y_scope / loc_y_bin_size) * 2
+    # print('=================== Decode bbox input =================')
+    # print('roibox3d input: {}'.format(roi_box3d.size()))
+    # print('pred_reg: {}'.format(pred_reg.size()))
+    anchor_size = anchor_size.to(roi_box3d.get_device()) #transform anchor box into cuda tensor
+    
+    per_loc_bin_num = int(loc_scope / loc_bin_size) * 2 # number of bins for x, z axes around point
+    loc_y_bin_num = int(loc_y_scope / loc_y_bin_size) * 2 # number of bins for y angle 
 
     # recover xz localization
     x_bin_l, x_bin_r = 0, per_loc_bin_num
@@ -58,8 +57,8 @@ def decode_bbox_target(roi_box3d, pred_reg, loc_scope, loc_bin_size, num_head_bi
     pos_x = x_bin.float() * loc_bin_size + loc_bin_size / 2 - loc_scope
     pos_z = z_bin.float() * loc_bin_size + loc_bin_size / 2 - loc_scope
 
-    if get_xz_fine:
-        x_res_l, x_res_r = per_loc_bin_num * 2, per_loc_bin_num * 3
+    if get_xz_fine: # increase number of bin boxes for better resolution 
+        x_res_l, x_res_r = per_loc_bin_num * 2, per_loc_bin_num * 3 
         z_res_l, z_res_r = per_loc_bin_num * 3, per_loc_bin_num * 4
         start_offset = z_res_r
 
@@ -81,12 +80,13 @@ def decode_bbox_target(roi_box3d, pred_reg, loc_scope, loc_bin_size, num_head_bi
         y_res_norm = torch.gather(pred_reg[:, y_res_l: y_res_r], dim=1, index=y_bin.unsqueeze(dim=1)).squeeze(dim=1)
         y_res = y_res_norm * loc_y_bin_size
         pos_y = y_bin.float() * loc_y_bin_size + loc_y_bin_size / 2 - loc_y_scope + y_res
-        pos_y = pos_y + roi_box3d[:, 1]
+        pos_y = pos_y + roi_box3d[:, 2]
     else:
         y_offset_l, y_offset_r = start_offset, start_offset + 1
         start_offset = y_offset_r
 
-        pos_y = roi_box3d[:, 1] + pred_reg[:, y_offset_l]
+        # TODO: Rename to z 
+        pos_y = roi_box3d[:, 2] + pred_reg[:, y_offset_l]
 
     # recover ry rotation
     ry_bin_l, ry_bin_r = start_offset, start_offset + num_head_bin
@@ -118,7 +118,7 @@ def decode_bbox_target(roi_box3d, pred_reg, loc_scope, loc_bin_size, num_head_bi
     roi_center = roi_box3d[:, 0:3]
     shift_ret_box3d = torch.cat((pos_x.view(-1, 1), pos_y.view(-1, 1), pos_z.view(-1, 1), hwl, ry.view(-1, 1)), dim=1)
     ret_box3d = shift_ret_box3d
-    if roi_box3d.shape[1] == 7:
+    if roi_box3d.shape[1] == 7: # for RCNN stage 2 
         roi_ry = roi_box3d[:, 6]
         ret_box3d = rotate_pc_along_y_torch(shift_ret_box3d, - roi_ry)
         ret_box3d[:, 6] += roi_ry

@@ -217,7 +217,7 @@ if __name__ == "__main__":
 
     # create dataloader & network & optimizer
     train_loader, test_loader = create_dataloader(logger)
-    model = PointRCNN(num_classes=train_loader.dataset.num_class, use_xyz=True, mode='TRAIN')
+    model = PointRCNN(num_classes=train_loader.dataset.num_class, use_xyz=True, mode='TRAIN', logger=logger)
     logger.debug(model)
     optimizer = create_optimizer(model)
 

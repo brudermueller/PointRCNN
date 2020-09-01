@@ -40,7 +40,7 @@ class CustomRCNNDataset(Dataset):
         # self.normalize = normalize
         self.intensity_channel = intensity_channel 
         # self.shuffle = shuffle
-        self.classes = ('Background', 'Pedestrian')
+        self.classes = ('Pedestrian')
         self.num_class = self.classes.__len__()
         
         # load all data files 
@@ -136,12 +136,13 @@ class CustomRCNNDataset(Dataset):
 
     def __len__(self):
         if cfg.RPN.ENABLED:
-            return len(self.current_samples)
+            return len(self.sample_id_list)
         elif cfg.RCNN.ENABLED:
             if self.mode == 'TRAIN':
+                #TODO: this needs to be changed (see KITTI Dataset)
                 return len(self.current_samples)
             else:
-                return len(self.image_idx_list)
+                return len(self.sanple_id_list)
         else:
             raise NotImplementedError
 
@@ -171,7 +172,9 @@ class CustomRCNNDataset(Dataset):
         pts_lidar = self.get_lidar(sample_id)
         labels = self.get_label(sample_id)
         if self.intensity_channel:
-            pts_intensity = pts_lidar[:, 3].reshape(-1,1)
+            pts_intensity = pts_lidar[:, 3]
+            # normalize intensity values by min, max possible values (0,255)
+            pts_intensity_norm = ((pts_intensity - 0) / (255 - 0)).reshape(-1,1) 
         
         sample_info = {'sample_id': sample_id, 'random_select': self.random_select}
 
@@ -196,17 +199,21 @@ class CustomRCNNDataset(Dataset):
                 np.random.shuffle(choice)
             
             pts_coor = pts_coor[choice,:]
-            pts_features = pts_intensity[choice,:]
+            pts_features = [pts_intensity_norm[choice,:]]
+            ret_pts_features = np.concatenate(pts_features, axis=1) if pts_features.__len__() > 1 else pts_features[0]
+
+            # self.logger.info('Point intensity features: {} {}'.format(np.min(pts_intensity_norm), np.max(pts_intensity_norm)))
+
   
         # prepare input
         if cfg.RPN.USE_INTENSITY:
-            pts_input = np.concatenate((pts_coor, pts_features), axis=1)  # (N, C)
+            pts_input = np.concatenate((pts_coor, ret_pts_features), axis=1)  # (N, C)
         else:
             pts_input = pts_coor
         
         sample_info['pts_input'] = pts_input
         sample_info['pts_rect'] = pts_input
-        sample_info['pts_features'] = pts_intensity[choice,:]
+        sample_info['pts_features'] = pts_intensity_norm[choice,:]
         
         # stop here if only testing 
         if self.mode == 'TEST':    

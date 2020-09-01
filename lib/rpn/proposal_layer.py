@@ -15,9 +15,9 @@ class ProposalLayer(nn.Module):
 
     def forward(self, rpn_scores, rpn_reg, xyz):
         """
-        :param rpn_scores: (B, N)
-        :param rpn_reg: (B, N, 8)
-        :param xyz: (B, N, 3)
+        :param rpn_scores: (B, N) rpn_cls[:, :, 0]
+        :param rpn_reg: (B, N, C) (error in code desc. C initially 8)
+        :param xyz: (B, N, 3) # backbone_xyz
         :return bbox3d: (B, M, 7)
         """
         batch_size = xyz.shape[0]
@@ -30,13 +30,14 @@ class ProposalLayer(nn.Module):
                                        get_xz_fine=cfg.RPN.LOC_XZ_FINE,
                                        get_y_by_bin=False,
                                        get_ry_fine=False)  # (N, 7)
-        proposals[:, 1] += proposals[:, 3] / 2  # set y as the center of bottom
+        proposals[:, 2] += proposals[:, 3] / 2  # set z as the center of bottom
         proposals = proposals.view(batch_size, -1, 7)
 
         scores = rpn_scores
-        _, sorted_idxs = torch.sort(scores, dim=1, descending=True)
+        _, sorted_idxs = torch.sort(scores, dim=1, descending=True) # sort by foreground and background 
 
         batch_size = scores.size(0)
+        # sample 512 points from pooled region of each proposal 
         ret_bbox3d = scores.new(batch_size, cfg[self.mode].RPN_POST_NMS_TOP_N, 7).zero_()
         ret_scores = scores.new(batch_size, cfg[self.mode].RPN_POST_NMS_TOP_N).zero_()
         for k in range(batch_size):

@@ -9,6 +9,7 @@ import torch
 import os
 
 import lib.utils.custom_data_utils as data_utils
+from lib.utils.kitti_utils import boxes3d_to_corners3d_velodyne
 
 box_colormap = [
     [1, 1, 1],
@@ -24,61 +25,8 @@ def check_numpy_to_torch(x):
     return x, False
 
 
-def rotate_points_along_z(points, angle):
-    """
-    Args:
-        points: (B, N, 3 + C)
-        angle: (B), angle along z-axis, angle increases x ==> y
-    Returns:
-
-    """
-    points, is_numpy = check_numpy_to_torch(points)
-    angle, _ = check_numpy_to_torch(angle)
-
-    cosa = torch.cos(angle)
-    sina = torch.sin(angle)
-    zeros = angle.new_zeros(points.shape[0])
-    ones = angle.new_ones(points.shape[0])
-    rot_matrix = torch.stack((
-        cosa,  sina, zeros,
-        -sina, cosa, zeros,
-        zeros, zeros, ones
-    ), dim=1).view(-1, 3, 3).float()
-    points_rot = torch.matmul(points[:, :, 0:3], rot_matrix)
-    points_rot = torch.cat((points_rot, points[:, :, 3:]), dim=-1)
-    return points_rot.numpy() if is_numpy else points_rot
-
-
-def boxes_to_corners_3d(boxes3d):
-    """
-        7 -------- 4
-       /|         /|
-      6 -------- 5 .
-      | |        | |
-      . 3 -------- 0
-      |/         |/
-      2 -------- 1
-    Args:
-        boxes3d:  (N, 7) [x, y, z, dx, dy, dz, heading], (x, y, z) is the box center
-
-    Returns: corners3d: (N, 8, 3)
-    """
-    boxes3d, is_numpy = check_numpy_to_torch(boxes3d)
-
-    template = boxes3d.new_tensor((
-        [1, 1, -1], [1, -1, -1], [-1, -1, -1], [-1, 1, -1],
-        [1, 1, 1], [1, -1, 1], [-1, -1, 1], [-1, 1, 1],
-    )) / 2
-    # h, w, l = boxes3d[:, 3], boxes3d[:, 4], boxes3d[:, 5]
-    corners3d = boxes3d[:, None, 3:6].repeat(1, 8, 1) * template[None, :, :]
-    corners3d = rotate_points_along_z(corners3d.view(-1, 8, 3), boxes3d[:, 6]).view(-1, 8, 3)
-    corners3d += boxes3d[:, None, 0:3]
-
-    return corners3d.numpy() if is_numpy else corners3d
-
-
 def visualize_pts(pts, fig=None, bgcolor=(0, 0, 0), fgcolor=(1.0, 1.0, 1.0),
-                  show_intensity=False, size=(600, 600), draw_origin=True):
+                  show_intensity=False, size=(1000, 1000), draw_origin=True):
     if not isinstance(pts, np.ndarray):
         pts = pts.cpu().numpy()
     if fig is None:
@@ -86,29 +34,32 @@ def visualize_pts(pts, fig=None, bgcolor=(0, 0, 0), fgcolor=(1.0, 1.0, 1.0),
 
     if show_intensity:
         G = mlab.points3d(pts[:, 0], pts[:, 1], pts[:, 2], pts[:, 3], mode='point',
-                          colormap='gnuplot', scale_factor=1, figure=fig)
+                          colormap='spectral', scale_factor=10, scale_mode='vector', figure=fig)
     else:
         G = mlab.points3d(pts[:, 0], pts[:, 1], pts[:, 2], mode='point',
-                          colormap='gnuplot', scale_factor=1, figure=fig)
+                          colormap='gnuplot', scale_factor=10, figure=fig)
     if draw_origin:
-        mlab.points3d(0, 0, 0, color=(1, 1, 1), mode='cube', scale_factor=0.2)
-        mlab.plot3d([0, 3], [0, 0], [0, 0], color=(0, 0, 1), tube_radius=0.1)
-        mlab.plot3d([0, 0], [0, 3], [0, 0], color=(0, 1, 0), tube_radius=0.1)
-        mlab.plot3d([0, 0], [0, 0], [0, 3], color=(1, 0, 0), tube_radius=0.1)
+        #draw origin
+        mlab.points3d(0, 0, 0, color=(1,1,1), mode='sphere', scale_factor=0.2)
     
-    TOP_Y_MIN=-20
-    TOP_Y_MAX=20
-    TOP_X_MIN=-20
-    TOP_X_MAX=20
-    TOP_Z_MIN=-2.0
-    TOP_Z_MAX=2.0
+    # draw fov (todo: update to real sensor spec.)
+    # fov=np.array([  # 45 degree
+    #     [20., 20., 0.,0.],
+    #     [20.,-20., 0.,0.],
+    # ],dtype=np.float64)
 
-    x1 = TOP_X_MIN
-    x2 = TOP_X_MAX
-    y1 = TOP_Y_MIN
-    y2 = TOP_Y_MAX
+    # mlab.plot3d([0, fov[0,0]], [0, fov[0,1]], [0, fov[0,2]], color=(1,1,1), tube_radius=None, line_width=1, figure=fig)
+    # mlab.plot3d([0, fov[1,0]], [0, fov[1,1]], [0, fov[1,2]], color=(1,1,1), tube_radius=None, line_width=1, figure=fig)
 
-    fig = draw_grid(x1, y1, x2, y2, fig)
+    #draw axis
+    axes=np.array([
+        [1.,0.,0.,0.],
+        [0.,1.,0.,0.],
+        [0.,0.,1.,0.],
+    ],dtype=np.float64)
+    mlab.plot3d([0, axes[0,0]], [0, axes[0,1]], [0, axes[0,2]], color=(1,0,0), tube_radius=None, figure=fig)
+    mlab.plot3d([0, axes[1,0]], [0, axes[1,1]], [0, axes[1,2]], color=(0,1,0), tube_radius=None, figure=fig)
+    mlab.plot3d([0, axes[2,0]], [0, axes[2,1]], [0, axes[2,2]], color=(0,0,1), tube_radius=None, figure=fig)
 
     return fig
 
@@ -161,37 +112,6 @@ def draw_multi_grid_range(fig, grid_size=20, bv_range=(-60, -60, 60, 60)):
     return fig
 
 
-def draw_scenes(points, gt_boxes=None, ref_boxes=None, ref_scores=None, ref_labels=None):
-    if not isinstance(points, np.ndarray):
-        points = points.cpu().numpy()
-    if ref_boxes is not None and not isinstance(ref_boxes, np.ndarray):
-        ref_boxes = ref_boxes.cpu().numpy()
-    if gt_boxes is not None and not isinstance(gt_boxes, np.ndarray):
-        gt_boxes = gt_boxes.cpu().numpy()
-    if ref_scores is not None and not isinstance(ref_scores, np.ndarray):
-        ref_scores = ref_scores.cpu().numpy()
-    if ref_labels is not None and not isinstance(ref_labels, np.ndarray):
-        ref_labels = ref_labels.cpu().numpy()
-
-    fig = visualize_pts(points)
-    fig = draw_multi_grid_range(fig, bv_range=(0, -40, 80, 40))
-    if gt_boxes is not None:
-        corners3d = boxes_to_corners_3d(gt_boxes)
-        fig = draw_corners3d(corners3d, fig=fig, color=(0, 0, 1), max_num=100)
-
-    if ref_boxes is not None:
-        ref_corners3d = boxes_to_corners_3d(ref_boxes)
-        if ref_labels is None:
-            fig = draw_corners3d(ref_corners3d, fig=fig, color=(0, 1, 0), cls=ref_scores, max_num=100)
-        else:
-            for k in range(ref_labels.min(), ref_labels.max() + 1):
-                cur_color = tuple(box_colormap[k % len(box_colormap)])
-                mask = (ref_labels == k)
-                fig = draw_corners3d(ref_corners3d[mask], fig=fig, color=cur_color, cls=ref_scores[mask], max_num=100)
-    mlab.view(azimuth=-179, elevation=54.0, distance=104.0, roll=90.0)
-    return fig
-
-
 def draw_corners3d(corners3d, fig, color=(1, 1, 1), line_width=2, cls=None, tag='', max_num=500, tube_radius=None):
     """
     :param corners3d: (N, 8, 3)
@@ -227,25 +147,60 @@ def draw_corners3d(corners3d, fig, color=(1, 1, 1), line_width=2, cls=None, tag=
             mlab.plot3d([b[i, 0], b[j, 0]], [b[i, 1], b[j, 1]], [b[i, 2], b[j, 2]], color=color, tube_radius=tube_radius,
                         line_width=line_width, figure=fig)
 
-        i, j = 0, 5
+        i, j = 2, 5
         mlab.plot3d([b[i, 0], b[j, 0]], [b[i, 1], b[j, 1]], [b[i, 2], b[j, 2]], color=color, tube_radius=tube_radius,
                     line_width=line_width, figure=fig)
-        i, j = 1, 4
+        i, j = 1, 6
         mlab.plot3d([b[i, 0], b[j, 0]], [b[i, 1], b[j, 1]], [b[i, 2], b[j, 2]], color=color, tube_radius=tube_radius,
                     line_width=line_width, figure=fig)
 
     return fig
 
+
+def draw_scenes(points, gt_boxes=None, ref_boxes=None, ref_scores=None, ref_labels=None):
+    if not isinstance(points, np.ndarray):
+        points = points.cpu().numpy()
+    if ref_boxes is not None and not isinstance(ref_boxes, np.ndarray):
+        ref_boxes = ref_boxes.cpu().numpy()
+    if gt_boxes is not None and not isinstance(gt_boxes, np.ndarray):
+        gt_boxes = gt_boxes.cpu().numpy()
+    if ref_scores is not None and not isinstance(ref_scores, np.ndarray):
+        ref_scores = ref_scores.cpu().numpy()
+    if ref_labels is not None and not isinstance(ref_labels, np.ndarray):
+        ref_labels = ref_labels.cpu().numpy()
+
+    fig = visualize_pts(points, show_intensity=True)
+    fig = draw_multi_grid_range(fig, bv_range=(0, -20, 40, 20))
+    if gt_boxes is not None:
+        corners3d = boxes3d_to_corners3d_velodyne(gt_boxes)
+        fig = draw_corners3d(corners3d, fig=fig, color=(0, 0, 1), max_num=100)
+
+    if ref_boxes is not None:
+        ref_corners3d = boxes3d_to_corners3d_velodyne(ref_boxes)
+        if ref_labels is None:
+            fig = draw_corners3d(ref_corners3d, fig=fig, color=(0, 1, 0), cls=ref_scores, max_num=100)
+        else:
+            for k in range(ref_labels.min(), ref_labels.max() + 1):
+                cur_color = tuple(box_colormap[k % len(box_colormap)])
+                mask = (ref_labels == k)
+                fig = draw_corners3d(ref_corners3d[mask], fig=fig, color=cur_color, cls=ref_scores[mask], max_num=100)
+    mlab.view(azimuth=-180, elevation=54.0, distance=62.0, roll=90.0, figure=fig, focalpoint=[ 12.0909996 , -1.04700089, -2.03249991])
+    return fig
+
+
 def readIntoNumpy(fileName):
     tmp = []
+    scores = []
     with open(fileName) as f:
         lines = []
         for line in f :
             splitLine = line.rstrip().split()
             res = splitLine[3:10]   # [x y z h w l ry]
+            score = splitLine[10]
             tmp.append(res)
+            scores.append(score)
     bboxes3d = np.array(tmp,  dtype=np.float32)
-    return bboxes3d
+    return bboxes3d, scores
 
 
 if __name__ == "__main__":
@@ -256,19 +211,12 @@ if __name__ == "__main__":
     lidar_file = os.path.join(DATA_PATH, all_val_files[0])
 
     assert os.path.exists(lidar_file)
-    pts, _ = data_utils.load_h5(lidar_file)
-
+    pts, _, bboxes = data_utils.load_h5(lidar_file, bbox=True)
 
     # path of output from model
-    bboxes3d_path = os.path.join(OUTPUT_PATH, "rpn/pedestrian/eval/epoch_0/val/detections/data/000001.txt")
-
-    bboxes3d = readIntoNumpy(bboxes3d_path)
-
-    # velo = np.fromfile(pts_file, dtype=np.float32).reshape(-1, 4)
-
-    fig = visualize_pts(pts, show_intensity=True)
-    draw_grid
-    corners3d = boxes_to_corners_3d(bboxes3d)
-    fig = draw_corners3d(corners3d, fig)
-
-    mayavi.mlab.show()
+    bboxes3d_path = os.path.join(OUTPUT_PATH, "rpn/pedestrian/eval/epoch_0/val/detections/data/000000.txt")
+    bboxes3d, scores = readIntoNumpy(bboxes3d_path)
+    best_box_idx = np.argmax(scores)
+    gt_boxes = np.reshape(bboxes, (-1, 7))
+    fig = draw_scenes(pts, gt_boxes=np.reshape(bboxes3d[best_box_idx,:], (-1,7)), ref_boxes=gt_boxes)
+    mlab.show()

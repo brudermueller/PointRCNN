@@ -8,6 +8,16 @@ import h5py
     Helper functions to write .h5 data files for pointnet, etc.
 '''
 
+def save_h5_basic(h5_filename, data, data_dtype='float32'):
+    h5_fout = h5py.File(h5_filename, 'w')
+    h5_fout.create_dataset(
+            'data', data=data,
+            compression='gzip', compression_opts=4,
+            dtype=data_dtype,
+    )
+    h5_fout.close()
+
+
 def save_h5(h5_filename, data, label, bbox=None, data_dtype='float32', label_dtype='int', 
             bbox_dtype='float32'):
     h5_fout = h5py.File(h5_filename, 'w')
@@ -29,6 +39,12 @@ def save_h5(h5_filename, data, label, bbox=None, data_dtype='float32', label_dty
         )       
     h5_fout.close()
     
+
+def load_h5_basic(filename): 
+    f = h5py.File(filename, 'r')
+    data = f['data'][:]
+    return data
+
 
 def load_h5(h5_filename, bbox=False):
     f = h5py.File(h5_filename, 'r')

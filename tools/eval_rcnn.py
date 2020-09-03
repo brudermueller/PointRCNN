@@ -9,6 +9,7 @@ from lib.datasets.kitti_rcnn_dataset import KittiRCNNDataset
 from lib.datasets.custom_dataset import CustomRCNNDataset
 import tools.train_utils.train_utils as train_utils
 from lib.utils.bbox_transform import decode_bbox_target
+from lib.utils.custom_data_utils import save_h5_basic
 from tools.kitti_object_eval_python.evaluate import evaluate as kitti_evaluate
 
 from lib.config import cfg, cfg_from_file, save_config_to_file, cfg_from_list
@@ -224,15 +225,19 @@ def eval_one_epoch_rpn(model, dataloader, epoch_id, result_dir, logger):
 
             if args.save_result or args.save_rpn_feature:
                 cur_pred_cls = cur_seg_result.cpu().numpy()
-                output_file = os.path.join(seg_output_dir, '%06d.npy' % cur_sample_id)
+                output_file = os.path.join(seg_output_dir, '%06d.h5' % cur_sample_id)
+
                 if not args.test:
+                    logger.info('ARGS = EVAL')
                     cur_gt_cls = cur_rpn_cls_label.cpu().numpy()
                     output_data = np.concatenate(
                         (cur_pts_rect.reshape(-1, 3), cur_gt_cls.reshape(-1, 1), cur_pred_cls.reshape(-1, 1)), axis=1)
                 else:
                     output_data = np.concatenate((cur_pts_rect.reshape(-1, 3), cur_pred_cls.reshape(-1, 1)), axis=1)
 
-                np.save(output_file, output_data.astype(np.float16))
+
+                logger.info('=> Saving segmentation outputdata with shape {}'.format(output_data.shape))
+                save_h5_basic(output_file, output_data)
 
                 # save as kitti format
                 # calib = dataset.get_calib(cur_sample_id)

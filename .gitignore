@@ -11,3 +11,4 @@
 **/dist
 tools/gt_database/
 .vscode/
+.ipynb_checkpoints

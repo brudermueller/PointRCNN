@@ -3,6 +3,8 @@
     https://github.com/open-mmlab/OpenPCDet/blob/master/tools/visual_utils/visualize_utils.py
 '''
 import _init_path
+import vtk
+from vtk.util import numpy_support
 import mayavi.mlab as mlab
 import numpy as np
 import torch
@@ -157,7 +159,7 @@ def draw_corners3d(corners3d, fig, color=(1, 1, 1), line_width=2, cls=None, tag=
     return fig
 
 
-def draw_scenes(points, gt_boxes=None, ref_boxes=None, ref_scores=None, ref_labels=None):
+def draw_scenes(points, gt_boxes=None, ref_boxes=None, ref_scores=None, ref_labels=None, foreground_pts=None):
     if not isinstance(points, np.ndarray):
         points = points.cpu().numpy()
     if ref_boxes is not None and not isinstance(ref_boxes, np.ndarray):
@@ -184,6 +186,8 @@ def draw_scenes(points, gt_boxes=None, ref_boxes=None, ref_scores=None, ref_labe
                 cur_color = tuple(box_colormap[k % len(box_colormap)])
                 mask = (ref_labels == k)
                 fig = draw_corners3d(ref_corners3d[mask], fig=fig, color=cur_color, cls=ref_scores[mask], max_num=100)
+    # plot foreground segmentation results
+    fig = draw_sphere_pts(foreground_pts, fig=fig)
     mlab.view(azimuth=-180, elevation=54.0, distance=62.0, roll=90.0, figure=fig, focalpoint=[ 12.0909996 , -1.04700089, -2.03249991])
     return fig
 
@@ -218,5 +222,13 @@ if __name__ == "__main__":
     bboxes3d, scores = readIntoNumpy(bboxes3d_path)
     best_box_idx = np.argmax(scores)
     gt_boxes = np.reshape(bboxes, (-1, 7))
-    fig = draw_scenes(pts, gt_boxes=np.reshape(bboxes3d[best_box_idx,:], (-1,7)), ref_boxes=gt_boxes)
+
+    # load foreground segmentation results 
+    seg_pts_file = os.path.join(OUTPUT_PATH, "rpn/pedestrian/eval/epoch_0/val/seg_result/000000.h5")
+    seg_pts = data_utils.load_h5_basic(seg_pts_file)
+    mask = seg_pts[:,4] > 0 
+    foreground = seg_pts[mask, :][:, 0:3]
+
+
+    fig = draw_scenes(pts, gt_boxes=np.reshape(bboxes3d[best_box_idx,:], (-1,7)), ref_boxes=gt_boxes, foreground_pts=foreground)
     mlab.show()

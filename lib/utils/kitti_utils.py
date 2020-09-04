@@ -116,8 +116,8 @@ def boxes3d_to_corners3d_velodyne(boxes3d, rotate=True):
     if rotate:
         rz = boxes3d[:, 6]
         zeros, ones = np.zeros(rz.size, dtype=np.float32), np.ones(rz.size, dtype=np.float32)
-        rot_list = np.array([[np.cos(rz), -np.sin(rz), zeros],
-                             [np.sin(rz), np.cos(rz), zeros],
+        rot_list = np.array([[np.cos(rz), np.sin(rz), zeros],
+                             [-np.sin(rz), np.cos(rz), zeros],
                              [zeros, zeros,  ones]])  # (3, 3, N)
         R_list = np.transpose(rot_list, (2, 0, 1))  # (N, 3, 3)
 
@@ -186,8 +186,8 @@ def boxes3d_to_corners3d_torch_veldoyne(boxes3d, flip=False):
     corners = torch.cat((x_corners.unsqueeze(dim=1), y_corners.unsqueeze(dim=1), z_corners.unsqueeze(dim=1)), dim=1) # (N, 3, 8)
 
     cosa, sina = torch.cos(rz), torch.sin(rz)
-    raw_1 = torch.cat([cosa, -sina, zeros], dim=1)
-    raw_2 = torch.cat([sina, cosa, zeros], dim=1)
+    raw_1 = torch.cat([cosa, sina, zeros], dim=1)
+    raw_2 = torch.cat([-sina, cosa, zeros], dim=1)
     raw_3 = torch.cat([zeros, zeros, ones], dim=1)
     R = torch.cat((raw_1.unsqueeze(dim=1), raw_2.unsqueeze(dim=1), raw_3.unsqueeze(dim=1)), dim=1)  # (N, 3, 3)
 

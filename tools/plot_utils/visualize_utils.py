@@ -20,6 +20,36 @@ box_colormap = [
     [1, 1, 0],
 ]
 
+def generate_corners3d(bbox):
+    """
+    Generate corners3d representation (oriented bounding box representation) for this object
+    :h,w,l bounding box dimensions 
+    :rz rotation angle around z-axis in velodyn coord. (-pi, pi)
+        7 -------- 6
+       /|         /|
+      4 -------- 5 .
+      | |        | |
+      . 3 -------- 2
+      |/         |/
+      0 -------- 1
+    :return corners_3d: (8, 3) corners of oriented box3d in Velodyne coord.
+    """
+    pos,h,w,l,rz = bbox[0:3], bbox[3], bbox[4], bbox[5], bbox[6]
+    # careful: width, length and height have been differently defined than in KITTI
+    x_corners = [w / 2, w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2]        
+    y_corners = [-l / 2, l / 2, l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2]
+    z_corners = [-h/2, -h/2, -h/2, -h/2, h/2, h/2, h/2, h/2]
+
+    # rotation now defined in Velodyne coords. -> around z-axis => yaw rot. 
+    R = np.array([[np.cos(rz), -np.sin(rz), 0],
+                  [np.sin(rz), np.cos(rz), 0],
+                  [0, 0, 1]])
+    corners3d = np.vstack([x_corners, y_corners, z_corners])  # (3, 8)
+    # transpose and rotate around orientation angle 
+    corners3d = np.dot(R, corners3d).T
+    corners3d = corners3d + pos
+    return np.reshape(corners3d, (1, 8,3))
+
 
 def check_numpy_to_torch(x):
     if isinstance(x, np.ndarray):
@@ -174,11 +204,15 @@ def draw_scenes(points, gt_boxes=None, ref_boxes=None, ref_scores=None, ref_labe
     fig = visualize_pts(points, show_intensity=True)
     fig = draw_multi_grid_range(fig, bv_range=(0, -20, 40, 20))
     if gt_boxes is not None:
-        corners3d = boxes3d_to_corners3d_velodyne(gt_boxes)
+        # corners3d = boxes3d_to_corners3d_velodyne(gt_boxes)
+        box = gt_boxes[0,:]
+        corners3d = generate_corners3d(box)
         fig = draw_corners3d(corners3d, fig=fig, color=(0, 0, 1), max_num=100)
 
     if ref_boxes is not None:
-        ref_corners3d = boxes3d_to_corners3d_velodyne(ref_boxes)
+        # ref_corners3d = boxes3d_to_corners3d_velodyne(ref_boxes)
+        ref_box = ref_boxes[0,:]
+        ref_corners3d = generate_corners3d(ref_box)
         if ref_labels is None:
             fig = draw_corners3d(ref_corners3d, fig=fig, color=(0, 1, 0), cls=ref_scores, max_num=100)
         else:
@@ -187,7 +221,8 @@ def draw_scenes(points, gt_boxes=None, ref_boxes=None, ref_scores=None, ref_labe
                 mask = (ref_labels == k)
                 fig = draw_corners3d(ref_corners3d[mask], fig=fig, color=cur_color, cls=ref_scores[mask], max_num=100)
     # plot foreground segmentation results
-    fig = draw_sphere_pts(foreground_pts, fig=fig)
+    if foreground_pts is not None:
+        fig = draw_sphere_pts(foreground_pts, fig=fig)
     mlab.view(azimuth=-180, elevation=54.0, distance=62.0, roll=90.0, figure=fig, focalpoint=[ 12.0909996 , -1.04700089, -2.03249991])
     return fig
 
@@ -212,23 +247,30 @@ if __name__ == "__main__":
     OUTPUT_PATH = os.path.join('../../', 'output/')
     all_val_files = data_utils.get_data_files(os.path.join(DATA_PATH, 'val.txt'))
     # path of lidar frame
-    lidar_file = os.path.join(DATA_PATH, all_val_files[0])
+    idx = 100
+    lidar_file = os.path.join(DATA_PATH, all_val_files[idx])
 
     assert os.path.exists(lidar_file)
     pts, _, bboxes = data_utils.load_h5(lidar_file, bbox=True)
 
     # path of output from model
-    bboxes3d_path = os.path.join(OUTPUT_PATH, "rpn/pedestrian/eval/epoch_0/val/detections/data/000000.txt")
+    if idx >= 1000: digit = str(idx)
+    elif idx >= 100: digit = '0' + str(idx)
+    elif idx >=10: digit = '00' + str(idx)
+    else: digit = '000' + str(idx)
+    bboxes3d_path = os.path.join(OUTPUT_PATH, "rpn/pedestrian/eval/epoch_0/val/detections/data/00{}.txt".format(digit))
     bboxes3d, scores = readIntoNumpy(bboxes3d_path)
     best_box_idx = np.argmax(scores)
     gt_boxes = np.reshape(bboxes, (-1, 7))
 
     # load foreground segmentation results 
-    seg_pts_file = os.path.join(OUTPUT_PATH, "rpn/pedestrian/eval/epoch_0/val/seg_result/000000.h5")
+    seg_pts_file = os.path.join(OUTPUT_PATH, "rpn/pedestrian/eval/epoch_0/val/seg_result/00{}.h5".format(digit))
     seg_pts = data_utils.load_h5_basic(seg_pts_file)
     mask = seg_pts[:,4] > 0 
     foreground = seg_pts[mask, :][:, 0:3]
 
 
     fig = draw_scenes(pts, gt_boxes=np.reshape(bboxes3d[best_box_idx,:], (-1,7)), ref_boxes=gt_boxes, foreground_pts=foreground)
+    # fig = draw_scenes(pts, gt_boxes=np.reshape(bboxes3d[best_box_idx,:], (-1,7)), ref_boxes=gt_boxes)
+
     mlab.show()

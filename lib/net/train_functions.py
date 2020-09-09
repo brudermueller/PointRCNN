@@ -105,7 +105,7 @@ def model_joint_fn_decorator():
                                         num_head_bin=cfg.RPN.NUM_HEAD_BIN,
                                         anchor_size=MEAN_SIZE,
                                         get_xz_fine=cfg.RPN.LOC_XZ_FINE,
-                                        get_y_by_bin=False,
+                                        get_z_by_bin=False,
                                         get_ry_fine=False)
 
             loss_size = 3 * loss_size  # consistent with old codes

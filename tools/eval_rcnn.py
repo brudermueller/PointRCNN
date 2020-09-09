@@ -70,18 +70,6 @@ def create_logger(log_file):
 
 
 def save_kitti_format(sample_id, bbox3d, kitti_output_dir, scores): # (sample_id, calib, bbox3d, kitti_output_dir, scores, img_shape))
-    corners3d = kitti_utils.boxes3d_to_corners3d_velodyne(bbox3d)
-    # img_boxes, _ = calib.corners3d_to_img_boxes(corners3d)
-
-    # img_boxes[:, 0] = np.clip(img_boxes[:, 0], 0, img_shape[1] - 1)
-    # img_boxes[:, 1] = np.clip(img_boxes[:, 1], 0, img_shape[0] - 1)
-    # img_boxes[:, 2] = np.clip(img_boxes[:, 2], 0, img_shape[1] - 1)
-    # img_boxes[:, 3] = np.clip(img_boxes[:, 3], 0, img_shape[0] - 1)
-
-    # img_boxes_w = img_boxes[:, 2] - img_boxes[:, 0]
-    # img_boxes_h = img_boxes[:, 3] - img_boxes[:, 1]
-    # box_valid_mask = np.logical_and(img_boxes_w < img_shape[1] * 0.8, img_boxes_h < img_shape[0] * 0.8)
-
     kitti_output_file = os.path.join(kitti_output_dir, '%06d.txt' % sample_id)
     with open(kitti_output_file, 'w') as f:
         for k in range(bbox3d.shape[0]):
@@ -152,6 +140,8 @@ def eval_one_epoch_rpn(model, dataloader, epoch_id, result_dir, logger):
 
         if not args.test: # evaluate with ground truth 
             rpn_cls_label, rpn_reg_label = data['rpn_cls_label'], data['rpn_reg_label']
+            print('======> rpn reg label:  \n{}'.format(rpn_reg_label[0,0,:]))
+
             gt_boxes3d = data['gt_boxes3d']
             logger.debug('==> Evaluating with ground truth: {}'.format(gt_boxes3d))
 
@@ -228,15 +218,13 @@ def eval_one_epoch_rpn(model, dataloader, epoch_id, result_dir, logger):
                 output_file = os.path.join(seg_output_dir, '%06d.h5' % cur_sample_id)
 
                 if not args.test:
-                    logger.info('ARGS = EVAL')
                     cur_gt_cls = cur_rpn_cls_label.cpu().numpy()
                     output_data = np.concatenate(
                         (cur_pts_rect.reshape(-1, 3), cur_gt_cls.reshape(-1, 1), cur_pred_cls.reshape(-1, 1)), axis=1)
                 else:
                     output_data = np.concatenate((cur_pts_rect.reshape(-1, 3), cur_pred_cls.reshape(-1, 1)), axis=1)
 
-
-                logger.info('=> Saving segmentation outputdata with shape {}'.format(output_data.shape))
+                # logger.info('=> Saving segmentation outputdata with shape {}'.format(output_data.shape))
                 save_h5_basic(output_file, output_data)
 
                 # save as kitti format
@@ -751,7 +739,7 @@ def eval_single_ckpt(root_result_dir):
         num_list = re.findall(r'\d+', args.ckpt) 
     elif args.rpn_ckpt: 
         path = args.rpn_ckpt
-        num_list = re.sub('\.pth$', '', path).split('_')[-1]
+        num_list = [re.sub('\.pth$', '', path).split('_')[-1]]
     else: 
         num_list = []
     

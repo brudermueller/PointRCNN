@@ -2,6 +2,12 @@ import torch
 import numpy as np
 
 
+def check_numpy_to_torch(x):
+    if isinstance(x, np.ndarray):
+        return torch.from_numpy(x).float(), True
+    return x, False
+
+
 def rotate_pc_along_y_torch(pc, rot_angle):
     """
     :param pc: (N, 3 + C)
@@ -21,8 +27,32 @@ def rotate_pc_along_y_torch(pc, rot_angle):
     return pc
 
 
+def rotate_points_along_z(points, angle):
+    """
+    Args:
+        points: (B, N, 3 + C)
+        angle: (B), angle along z-axis, angle increases x ==> y
+    Returns:
+    """
+    points, is_numpy = check_numpy_to_torch(points)
+    angle, _ = check_numpy_to_torch(angle)
+
+    cosa = torch.cos(angle)
+    sina = torch.sin(angle)
+    zeros = angle.new_zeros(points.shape[0])
+    ones = angle.new_ones(points.shape[0])
+    rot_matrix = torch.stack((
+        cosa,  sina, zeros,
+        -sina, cosa, zeros,
+        zeros, zeros, ones
+    ), dim=1).view(-1, 3, 3).float()
+    points_rot = torch.matmul(points[:, :, 0:3], rot_matrix)
+    points_rot = torch.cat((points_rot, points[:, :, 3:]), dim=-1)
+    return points_rot.numpy() if is_numpy else points_rot
+
+
 def decode_bbox_target(roi_box3d, pred_reg, loc_scope, loc_bin_size, num_head_bin, anchor_size,
-                       get_xz_fine=True, get_y_by_bin=False, loc_y_scope=0.5, loc_y_bin_size=0.25, get_ry_fine=False):
+                       get_xy_fine=True, get_z_by_bin=False, loc_z_scope=0.5, loc_z_bin_size=0.25, get_ry_fine=False):
     """
     This function is used in both network stages (RPN and RCNN) in order to recover the 3D bounding boxes from regression. 
     :param roi_box3d: (N, 7) for RCNN, (N,3) for RPN # backbone_xyz (coordinates of foreground points)
@@ -44,49 +74,50 @@ def decode_bbox_target(roi_box3d, pred_reg, loc_scope, loc_bin_size, num_head_bi
     anchor_size = anchor_size.to(roi_box3d.get_device()) #transform anchor box into cuda tensor
     
     per_loc_bin_num = int(loc_scope / loc_bin_size) * 2 # number of bins for x, z axes around point
-    loc_y_bin_num = int(loc_y_scope / loc_y_bin_size) * 2 # number of bins for y angle 
+    loc_z_bin_num = int(loc_z_scope / loc_z_bin_size) * 2 
 
     # recover xz localization
     x_bin_l, x_bin_r = 0, per_loc_bin_num
-    z_bin_l, z_bin_r = per_loc_bin_num, per_loc_bin_num * 2
-    start_offset = z_bin_r
+    y_bin_l, y_bin_r = per_loc_bin_num, per_loc_bin_num * 2
+    start_offset = y_bin_r
 
     x_bin = torch.argmax(pred_reg[:, x_bin_l: x_bin_r], dim=1)
-    z_bin = torch.argmax(pred_reg[:, z_bin_l: z_bin_r], dim=1)
+    y_bin = torch.argmax(pred_reg[:, y_bin_l: y_bin_r], dim=1)
 
-    pos_x = x_bin.float() * loc_bin_size + loc_bin_size / 2 - loc_scope
-    pos_z = z_bin.float() * loc_bin_size + loc_bin_size / 2 - loc_scope
+    # pos_x = x_bin.float() * loc_bin_size + loc_bin_size / 2 - loc_scope
+    # pos_y = y_bin.float() * loc_bin_size + loc_bin_size / 2 - loc_scope
 
-    if get_xz_fine: # increase number of bin boxes for better resolution 
+    pos_x = x_bin.float() * loc_bin_size + loc_bin_size / 2 + loc_scope
+    pos_y = y_bin.float() * loc_bin_size + loc_bin_size / 2 + loc_scope
+
+    if get_xy_fine: # increase number of bin boxes for better resolution 
         x_res_l, x_res_r = per_loc_bin_num * 2, per_loc_bin_num * 3 
-        z_res_l, z_res_r = per_loc_bin_num * 3, per_loc_bin_num * 4
-        start_offset = z_res_r
-
-        x_res_norm = torch.gather(pred_reg[:, x_res_l: x_res_r], dim=1, index=x_bin.unsqueeze(dim=1)).squeeze(dim=1)
-        z_res_norm = torch.gather(pred_reg[:, z_res_l: z_res_r], dim=1, index=z_bin.unsqueeze(dim=1)).squeeze(dim=1)
-        x_res = x_res_norm * loc_bin_size
-        z_res = z_res_norm * loc_bin_size
-
-        pos_x += x_res
-        pos_z += z_res
-
-    # recover y localization
-    if get_y_by_bin:
-        y_bin_l, y_bin_r = start_offset, start_offset + loc_y_bin_num
-        y_res_l, y_res_r = y_bin_r, y_bin_r + loc_y_bin_num
+        y_res_l, y_res_r = per_loc_bin_num * 3, per_loc_bin_num * 4
         start_offset = y_res_r
 
-        y_bin = torch.argmax(pred_reg[:, y_bin_l: y_bin_r], dim=1)
+        x_res_norm = torch.gather(pred_reg[:, x_res_l: x_res_r], dim=1, index=x_bin.unsqueeze(dim=1)).squeeze(dim=1)
         y_res_norm = torch.gather(pred_reg[:, y_res_l: y_res_r], dim=1, index=y_bin.unsqueeze(dim=1)).squeeze(dim=1)
-        y_res = y_res_norm * loc_y_bin_size
-        pos_y = y_bin.float() * loc_y_bin_size + loc_y_bin_size / 2 - loc_y_scope + y_res
-        pos_y = pos_y + roi_box3d[:, 2]
-    else:
-        y_offset_l, y_offset_r = start_offset, start_offset + 1
-        start_offset = y_offset_r
+        x_res = x_res_norm * loc_bin_size
+        y_res = y_res_norm * loc_bin_size
 
-        # TODO: Rename to z 
-        pos_y = roi_box3d[:, 2] + pred_reg[:, y_offset_l]
+        pos_x += x_res
+        pos_y += y_res
+
+    # recover z localization
+    if get_z_by_bin:
+        z_bin_l, z_bin_r = start_offset, start_offset + loc_z_bin_num
+        z_res_l, z_res_r = z_bin_r, z_bin_r + loc_z_bin_num
+        start_offset = z_res_r
+
+        z_bin = torch.argmax(pred_reg[:, z_bin_l: z_bin_r], dim=1)
+        z_res_norm = torch.gather(pred_reg[:, z_res_l: z_res_r], dim=1, index=z_bin.unsqueeze(dim=1)).squeeze(dim=1)
+        z_res = z_res_norm * loc_z_bin_size
+        pos_z = z_bin.float() * loc_z_bin_size + loc_z_bin_size / 2 - loc_z_scope + z_res
+        pos_z = pos_z + roi_box3d[:, 2]
+    else:
+        z_offset_l, z_offset_r = start_offset, start_offset + 1
+        start_offset = z_offset_r
+        pos_z = roi_box3d[:, 2] + pred_reg[:, z_offset_l]
 
     # recover ry rotation
     ry_bin_l, ry_bin_r = start_offset, start_offset + num_head_bin
@@ -120,8 +151,10 @@ def decode_bbox_target(roi_box3d, pred_reg, loc_scope, loc_bin_size, num_head_bi
     ret_box3d = shift_ret_box3d
     if roi_box3d.shape[1] == 7: # for RCNN stage 2 
         roi_ry = roi_box3d[:, 6]
-        ret_box3d = rotate_pc_along_y_torch(shift_ret_box3d, - roi_ry)
+        # ret_box3d = rotate_pc_along_y_torch(shift_ret_box3d, - roi_ry)
+        ret_box3d = rotate_points_along_z(shift_ret_box3d, - roi_ry)
         ret_box3d[:, 6] += roi_ry
-    ret_box3d[:, [0, 2]] += roi_center[:, [0, 2]]
+
+    ret_box3d[:, [0, 1]] += roi_center[:, [0, 1]]
 
     return ret_box3d

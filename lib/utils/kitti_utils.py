@@ -211,6 +211,21 @@ def boxes3d_to_bev_torch(boxes3d):
     boxes_bev[:, 4] = boxes3d[:, 6]
     return boxes_bev
 
+def boxes3d_to_bev_torch_velodyne(boxes3d):
+    """
+    :param boxes3d: (N, 7) [x, y, z, h, w, l, ry]
+    :return:
+        boxes_bev: (N, 5) [x1, y1, x2, y2, ry]
+    """
+    boxes_bev = boxes3d.new(torch.Size((boxes3d.shape[0], 5)))
+
+    cu, cv = boxes3d[:, 0], boxes3d[:, 1]
+    half_l, half_w = boxes3d[:, 5] / 2, boxes3d[:, 4] / 2
+    boxes_bev[:, 0], boxes_bev[:, 1] = cu - half_w, cv - half_l
+    boxes_bev[:, 2], boxes_bev[:, 3] = cu + half_w, cv + half_l
+    boxes_bev[:, 4] = boxes3d[:, 6]
+    return boxes_bev
+    
 
 def enlarge_box3d(boxes3d, extra_width):
     """
@@ -221,7 +236,8 @@ def enlarge_box3d(boxes3d, extra_width):
     else:
         large_boxes3d = boxes3d.clone()
     large_boxes3d[:, 3:6] += extra_width * 2
-    large_boxes3d[:, 1] += extra_width
+    # large_boxes3d[:, 1] += extra_width
+    large_boxes3d[:, 2] += extra_width
     return large_boxes3d
 
 

@@ -165,8 +165,8 @@ class CustomRCNNDataset(Dataset):
         labels = self.get_label(sample_id)
         if self.intensity_channel:
             pts_intensity = pts_lidar[:, 3]
-            # normalize intensity values by min, max possible values (0,255)
-            pts_intensity_norm = ((pts_intensity - 0) / (255 - 0)).reshape(-1,1) 
+            # normalize intensity values by min, max possible values (0,255) & translate intensity to [-0.5, 0.5]
+            pts_intensity_norm = ((pts_intensity - 0) / (255 - 0)).reshape(-1,1) - 0.5
         
         sample_info = {'sample_id': sample_id, 'random_select': self.random_select}
 
@@ -199,9 +199,6 @@ class CustomRCNNDataset(Dataset):
             pts_features = [pts_intensity_norm[choice,:]]
             ret_pts_features = np.concatenate(pts_features, axis=1) if pts_features.__len__() > 1 else pts_features[0]
 
-            # self.logger.info('Point intensity features: {} {}'.format(np.min(pts_intensity_norm), np.max(pts_intensity_norm)))
-
-  
         # prepare input
         if cfg.RPN.USE_INTENSITY:
             pts_input = np.concatenate((pts_coor, ret_pts_features), axis=1)  # (N, C)
@@ -226,7 +223,6 @@ class CustomRCNNDataset(Dataset):
         # generate training labels 
         rpn_cls_label, rpn_reg_label = self.generate_rpn_training_labels(pts_coor, gt_boxes3d)
         # rpn_cls_label = (labels[choice,:]).astype(np.float32)
-        rpn_reg_label = rpn_reg_label 
         sample_info['rpn_cls_label'] =  rpn_cls_label # 0:background, 1: pedestrian
         sample_info['rpn_reg_label'] = rpn_reg_label
         sample_info['gt_boxes3d'] = gt_boxes3d
@@ -254,8 +250,8 @@ class CustomRCNNDataset(Dataset):
 
             # pixel offset of object center
             center3d = gt_boxes3d[k][0:3].copy()  # (x, y, z)
-            center3d[1] -= gt_boxes3d[k][3] / 2
-            reg_label[fg_pt_flag, 0:3] = center3d - fg_pts_coor  # Now y is the true center of 3d box 
+            center3d[2] += gt_boxes3d[k][3] / 2
+            reg_label[fg_pt_flag, 0:3] = center3d - fg_pts_coor  # Now z is the true center of 3d box 
 
             # size and angle encoding
             reg_label[fg_pt_flag, 3] = gt_boxes3d[k][3]  # h

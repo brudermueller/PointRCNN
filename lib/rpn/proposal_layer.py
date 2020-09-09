@@ -27,10 +27,12 @@ class ProposalLayer(nn.Module):
                                        loc_scope=cfg.RPN.LOC_SCOPE,
                                        loc_bin_size=cfg.RPN.LOC_BIN_SIZE,
                                        num_head_bin=cfg.RPN.NUM_HEAD_BIN,
-                                       get_xz_fine=cfg.RPN.LOC_XZ_FINE,
-                                       get_y_by_bin=False,
+                                       get_xy_fine=cfg.RPN.LOC_XZ_FINE,
+                                       get_z_by_bin=False,
                                        get_ry_fine=False)  # (N, 7)
-        proposals[:, 2] += proposals[:, 3] / 2  # set z as the center of bottom
+        proposals[:, 2] -= proposals[:, 3] / 2  # set z as the center of bottom
+        # proposals[:, 1] += proposals[:, 3] / 2  # set y as the center of bottom
+
         proposals = proposals.view(batch_size, -1, 7)
 
         scores = rpn_scores
@@ -65,11 +67,14 @@ class ProposalLayer(nn.Module):
         :param proposals: (N, 7)
         :param order: (N)
         """
-        nms_range_list = [0, 40.0, 80.0] #TODO: to be extended for 360 degreees with negative values 
+        # nms_range_list = [0, 40.0, 80.0]
+        nms_range_list = [-40,-20, 0, 20.0, 40.0] #TODO: to be extended for 360 degreees with negative values 
         pre_tot_top_n = cfg[self.mode].RPN_PRE_NMS_TOP_N
-        pre_top_n_list = [0, int(pre_tot_top_n * 0.7), pre_tot_top_n - int(pre_tot_top_n * 0.7)]
+        # pre_top_n_list = [0, int(pre_tot_top_n * 0.7), pre_tot_top_n - int(pre_tot_top_n * 0.7)]
+        pre_top_n_list = [int(pre_tot_top_n * 0.15), int(pre_tot_top_n * 0.35),  0, int(pre_tot_top_n * 0.35), pre_tot_top_n - int(pre_tot_top_n * 0.15)]
         post_tot_top_n = cfg[self.mode].RPN_POST_NMS_TOP_N
-        post_top_n_list = [0, int(post_tot_top_n * 0.7), post_tot_top_n - int(post_tot_top_n * 0.7)]
+        # post_top_n_list = [0, int(post_tot_top_n * 0.7), post_tot_top_n - int(post_tot_top_n * 0.7)]
+        post_top_n_list = [int(post_tot_top_n * 0.15), int(post_tot_top_n * 0.35),  0, int(post_tot_top_n * 0.35), post_tot_top_n - int(post_tot_top_n * 0.75)]
 
         scores_single_list, proposals_single_list = [], []
 
@@ -77,11 +82,22 @@ class ProposalLayer(nn.Module):
         scores_ordered = scores[order]
         proposals_ordered = proposals[order]
 
-        dist = proposals_ordered[:, 2]
-        first_mask = (dist > nms_range_list[0]) & (dist <= nms_range_list[1])
+        # print(proposals_ordered.size())
+        # dist = proposals_ordered[:, 2]
+        # print('z-dimension: ',torch.min(dist), torch.max(dist))
+        # print(dist)
+        dist = proposals_ordered[:, 1]
+        # print('y-dimension: ', torch.min(dist), torch.max(dist))
+
+        # print(dist)
+        # first_mask = (dist > nms_range_list[0]) & (dist <= nms_range_list[1])
+        first_mask = (dist > nms_range_list[1]) & (dist <= nms_range_list[3])
+
+        # print(first_mask.sum())
         for i in range(1, len(nms_range_list)):
             # get proposal distance mask
             dist_mask = ((dist > nms_range_list[i - 1]) & (dist <= nms_range_list[i]))
+            # print(dist_mask.sum())
 
             if dist_mask.sum() != 0:
                 # this area has points
@@ -93,7 +109,11 @@ class ProposalLayer(nn.Module):
                 cur_scores = cur_scores[:pre_top_n_list[i]]
                 cur_proposals = cur_proposals[:pre_top_n_list[i]]
             else:
-                assert i == 2, '%d' % i
+                # assert i != 1, '%d' % i
+                # if i == 1: 
+                #     print(torch.min(dist), torch.max(dist))
+                #     print(first_mask.sum())
+                #     raise AttributeError
                 # this area doesn't have any points, so use rois of first area
                 cur_scores = scores_ordered[first_mask]
                 cur_proposals = proposals_ordered[first_mask]
@@ -103,7 +123,7 @@ class ProposalLayer(nn.Module):
                 cur_proposals = cur_proposals[pre_top_n_list[i - 1]:][:pre_top_n_list[i]]
 
             # oriented nms
-            boxes_bev = kitti_utils.boxes3d_to_bev_torch(cur_proposals)
+            boxes_bev = kitti_utils.boxes3d_to_bev_torch_velodyne(cur_proposals)
             if cfg.RPN.NMS_TYPE == 'rotate':
                 keep_idx = iou3d_utils.nms_gpu(boxes_bev, cur_scores, cfg[self.mode].RPN_NMS_THRESH)
             elif cfg.RPN.NMS_TYPE == 'normal':
@@ -136,7 +156,7 @@ class ProposalLayer(nn.Module):
         cur_scores = scores_ordered[:cfg[self.mode].RPN_PRE_NMS_TOP_N]
         cur_proposals = proposals_ordered[:cfg[self.mode].RPN_PRE_NMS_TOP_N]
 
-        boxes_bev = kitti_utils.boxes3d_to_bev_torch(cur_proposals)
+        boxes_bev = kitti_utils.boxes3d_to_bev_torch_velodyne(cur_proposals) # project to birds eye view 
         keep_idx = iou3d_utils.nms_gpu(boxes_bev, cur_scores, cfg[self.mode].RPN_NMS_THRESH)
 
         # Fetch post nms top k

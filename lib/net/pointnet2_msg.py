@@ -63,7 +63,7 @@ class Pointnet2MSG(nn.Module):
         cur_logger.debug('=> POINTNET++ Forward Pass')
         cur_logger.debug('Pointcloud input: {}'.format(pointcloud.size()))
         xyz, features = self._break_up_pc(pointcloud)
-        feature_size = (features.size() if features else None)
+        feature_size = (features.size() if features is not None else None)
         cur_logger.debug('xyz: {}, features: {}'.format(xyz.size(), feature_size))
 
         l_xyz, l_features = [xyz], [features]

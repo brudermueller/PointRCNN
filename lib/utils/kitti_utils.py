@@ -5,6 +5,27 @@ import lib.utils.object3d as object3d
 import torch
 
 
+def global_rotation(gt_boxes, points, rot_range):
+    """
+    Args:
+        gt_boxes: (N, 7 + C), [x, y, z, dx, dy, dz, heading, [vx], [vy]]
+        points: (M, 3 + C),
+        rot_range: [min, max]
+    Returns:
+    """
+    noise_rotation = np.random.uniform(rot_range[0], rot_range[1])
+    points = common_utils.rotate_pc_along_z(points[np.newaxis, :, :], np.array([noise_rotation]))[0]
+    gt_boxes[:, 0:3] = common_utils.rotate_pc_along_z(gt_boxes[np.newaxis, :, 0:3], np.array([noise_rotation]))[0]
+    gt_boxes[:, 6] += noise_rotation
+    if gt_boxes.shape[1] > 7:
+        gt_boxes[:, 7:9] = common_utils.rotate_pc_along_z(
+            np.hstack((gt_boxes[:, 7:9], np.zeros((gt_boxes.shape[0], 1))))[np.newaxis, :, :],
+            np.array([noise_rotation])
+        )[0][:, 0:2]
+
+    return gt_boxes, points
+
+
 def get_objects_from_label(label_file):
     with open(label_file, 'r') as f:
         lines = f.readlines()
@@ -41,10 +62,12 @@ def rotate_pc_along_y(pc, rot_angle):
     pc[:, [0, 2]] = np.dot(pc[:, [0, 2]], np.transpose(rotmat))
     return pc
 
+
 def check_numpy_to_torch(x):
     if isinstance(x, np.ndarray):
         return torch.from_numpy(x).float(), True
     return x, False
+
 
 def rotate_pc_along_z(points, angle):
     """
@@ -164,6 +187,7 @@ def boxes3d_to_corners3d_velodyne(boxes3d, rotate=True):
 
     return corners.astype(np.float32)
 
+
 def boxes3d_to_corners3d_torch(boxes3d, flip=False):
     """
     :param boxes3d: (N, 7) [x, y, z, h, w, l, ry]
@@ -192,6 +216,7 @@ def boxes3d_to_corners3d_torch(boxes3d, flip=False):
     corners_rotated = corners_rotated + centers.unsqueeze(dim=2).expand(-1, -1, 8)
     corners_rotated = corners_rotated.permute(0, 2, 1)
     return corners_rotated
+
 
 def boxes3d_to_corners3d_torch_veldoyne(boxes3d, flip=False):
     """
@@ -224,6 +249,7 @@ def boxes3d_to_corners3d_torch_veldoyne(boxes3d, flip=False):
     corners_rotated = corners_rotated.permute(0, 2, 1)
     return corners_rotated
 
+
 def boxes3d_to_bev_torch(boxes3d):
     """
     :param boxes3d: (N, 7) [x, y, z, h, w, l, ry]
@@ -238,6 +264,7 @@ def boxes3d_to_bev_torch(boxes3d):
     boxes_bev[:, 2], boxes_bev[:, 3] = cu + half_l, cv + half_w
     boxes_bev[:, 4] = boxes3d[:, 6]
     return boxes_bev
+
 
 def boxes3d_to_bev_torch_velodyne(boxes3d):
     """

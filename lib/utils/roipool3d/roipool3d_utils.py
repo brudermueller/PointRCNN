@@ -95,13 +95,13 @@ def roipool3d_cpu(boxes3d, pts, pts_feature, pts_extra_input, pool_extra_width, 
 
     if canonical_transform:
         # Translate to the roi coordinates
-        roi_ry = boxes3d[:, 6] % (2 * np.pi)  # 0~2pi
+        roi_rz = boxes3d[:, 6] % (2 * np.pi)  # 0~2pi
         roi_center = boxes3d[:, 0:3]
 
         # shift to center
         sampled_pts_input[:, :, 0:3] = sampled_pts_input[:, :, 0:3] - roi_center[:, np.newaxis, :]
         for k in range(sampled_pts_input.shape[0]):
-            sampled_pts_input[k] = kitti_utils.rotate_pc_along_y(sampled_pts_input[k], roi_ry[k])
+            sampled_pts_input[k] = kitti_utils.rotate_pc_along_z(sampled_pts_input[k], roi_rz[k])
 
         return sampled_pts_input, sampled_pts_feature
 

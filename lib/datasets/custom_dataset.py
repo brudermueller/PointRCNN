@@ -120,8 +120,9 @@ class CustomRCNNDataset(Dataset):
         return np.reshape(labels, (-1,1))
 
     def get_bbox_label(self, index):
-        """ Return bbox annotations per frame, defined as (N,7), i.e. (N x [x, y, z, h, w, l, ry])
-
+        """ 
+        Return bbox annotations per frame, defined as (N,7), i.e. (N x [x, y, z, h, w, l, ry])
+        
         Args:
             frame (string): frame id 
         """
@@ -132,6 +133,7 @@ class CustomRCNNDataset(Dataset):
         _, _, bbox = data_utils.load_h5(lidar_file, bbox=True)
         # transform single bbox annotation in list for compability reasons (dataset can be extended with >1 bboxes per frame)
         bbox_list = np.reshape(bbox, (1,-1)) 
+        bbox_obj_list = [object3d.Object3d(box, gt=True) for box in bbox_list]
         return bbox_list
 
     def __len__(self):
@@ -217,7 +219,7 @@ class CustomRCNNDataset(Dataset):
 
         # prepare 3d ground truth bound boxes sss
         gt_bbox_list = self.get_bbox_label(index)
-        gt_obj_list = [object3d.Object3d(box_annot, gt=True) for box_annot in gt_bbox_list]
+        # gt_obj_list = [object3d.Object3d(box_annot, gt=True) for box_annot in gt_bbox_list]
         gt_boxes3d = kitti_utils.objs_to_boxes3d_velodyne(gt_obj_list)
 
         #TODO: data augmentation
@@ -324,9 +326,9 @@ class CustomRCNNDataset(Dataset):
         """ 
             If proposals from first stage were saved to txt files, they can be directly loaded. 
         """
-
         sample_id = int(self.image_idx_list[index])
         proposal_file = os.path.join(self.rcnn_eval_roi_dir, '%06d.txt' % sample_id)
+        # get detections from output file of stage 1 
         roi_obj_list = kitti_utils.get_objects_from_label(proposal_file)
 
         rpn_xyz, rpn_features, rpn_intensity, seg_mask = self.get_rpn_features(self.rcnn_eval_feature_dir, sample_id)
@@ -351,12 +353,12 @@ class CustomRCNNDataset(Dataset):
                            'pts_depth': np.linalg.norm(rpn_xyz, ord=2, axis=1)}
 
             if self.mode != 'TEST':
-                gt_obj_list = self.filtrate_objects(self.get_label(sample_id))
+                gt_obj_list = self.get_bbox_label(sample_id)
                 gt_boxes3d = kitti_utils.objs_to_boxes3d(gt_obj_list)
 
-                roi_corners = kitti_utils.boxes3d_to_corners3d(roi_boxes3d)
-                gt_corners = kitti_utils.boxes3d_to_corners3d(gt_boxes3d)
-                iou3d = kitti_utils.get_iou3d(roi_corners, gt_corners)
+                roi_corners = kitti_utils.boxes3d_to_corners3d_velodyne(roi_boxes3d)
+                gt_corners = kitti_utils.boxes3d_to_corners3d_velodyne(gt_boxes3d)
+                iou3d = kitti_utils.get_iou3d_velodyne(roi_corners, gt_corners)
                 if gt_boxes3d.shape[0] > 0:
                     gt_iou = iou3d.max(axis=1)
                 else:
@@ -373,7 +375,7 @@ class CustomRCNNDataset(Dataset):
 
         if cfg.RCNN.USE_DEPTH:
             cur_depth = np.linalg.norm(pts_rect, axis=1, ord=2)
-            cur_depth_norm = (cur_depth / 70.0) - 0.5
+            cur_depth_norm = (cur_depth / 20.0) - 0.5
             pts_extra_input_list.append(cur_depth_norm.reshape(-1, 1))
 
         pts_extra_input = np.concatenate(pts_extra_input_list, axis=1)
@@ -391,7 +393,7 @@ class CustomRCNNDataset(Dataset):
         if self.mode == 'TEST':
             return sample_dict
 
-        gt_obj_list = self.filtrate_objects(self.get_label(sample_id))
+        gt_obj_list = self.get_bbox_label(sample_id)
         gt_boxes3d = np.zeros((gt_obj_list.__len__(), 7), dtype=np.float32)
 
         for k, obj in enumerate(gt_obj_list):
@@ -401,15 +403,14 @@ class CustomRCNNDataset(Dataset):
         if gt_boxes3d.__len__() == 0:
             gt_iou = np.zeros((roi_boxes3d.shape[0]), dtype=np.float32)
         else:
-            roi_corners = kitti_utils.boxes3d_to_corners3d(roi_boxes3d)
-            gt_corners = kitti_utils.boxes3d_to_corners3d(gt_boxes3d)
-            iou3d = kitti_utils.get_iou3d(roi_corners, gt_corners)
+            roi_corners = kitti_utils.boxes3d_to_corners3d_velodyne(roi_boxes3d)
+            gt_corners = kitti_utils.boxes3d_to_corners3d_velodyne(gt_boxes3d)
+            iou3d = kitti_utils.get_iou3d_velodyne(roi_corners, gt_corners)
             gt_iou = iou3d.max(axis=1)
         sample_dict['gt_boxes3d'] = gt_boxes3d
         sample_dict['gt_iou'] = gt_iou
 
         return sample_dict
-    
     
     def get_rcnn_sample_info(self, roi_info):
         sample_id, gt_box3d = roi_info['sample_id'], roi_info['gt_box3d']
@@ -522,11 +523,11 @@ class CustomRCNNDataset(Dataset):
         roi_boxes3d = kitti_utils.objs_to_boxes3d(roi_obj_list)
         # roi_scores = kitti_utils.objs_to_scores(roi_obj_list)
 
-        gt_obj_list = self.filtrate_objects(self.get_label(sample_id))
+        gt_obj_list = self.get_bbox_label(sample_id)
         gt_boxes3d = kitti_utils.objs_to_boxes3d(gt_obj_list)
 
         # calculate original iou
-        iou3d = kitti_utils.get_iou3d(kitti_utils.boxes3d_to_corners3d(roi_boxes3d),
+        iou3d = kitti_utils.get_iou3d_velodyne(kitti_utils.boxes3d_to_corners3d(roi_boxes3d),
                                       kitti_utils.boxes3d_to_corners3d(gt_boxes3d))
         max_overlaps, gt_assignment = iou3d.max(axis=1), iou3d.argmax(axis=1)
         max_iou_of_gt, roi_assignment = iou3d.max(axis=0), iou3d.argmax(axis=0)
@@ -673,9 +674,6 @@ class CustomRCNNDataset(Dataset):
         pts_features = pts_features[choice]
 
         return pts_input, pts_features
-
-        def get_rcnn_sample_jit(self, index):
-        raise NotImplementedError
     
     def aug_roi_by_noise(self, roi_info):
         """
@@ -698,7 +696,7 @@ class CustomRCNNDataset(Dataset):
                 else:
                     aug_box3d = self.random_aug_box3d(roi_box3d)
             aug_corners = kitti_utils.boxes3d_to_corners3d(aug_box3d.reshape(-1, 7))
-            iou3d = kitti_utils.get_iou3d(aug_corners, gt_corners)
+            iou3d = kitti_utils.get_iou3d_velodyne(aug_corners, gt_corners)
             temp_iou = iou3d[0][0]
             cnt += 1
             if original_iou < pos_thresh:  # original bg, break
@@ -786,10 +784,47 @@ class CustomRCNNDataset(Dataset):
                                                  torch.from_numpy(roi_rz).float()).numpy()
 
         return pts_input, gt_boxes3d_ct
+        
+    def data_augmentation(self, aug_pts_rect, aug_gt_boxes3d, gt_alpha, sample_id=None, mustaug=False, stage=1):
+        """
+        :param aug_pts_rect: (N, 3)
+        :param aug_gt_boxes3d: (N, 7)
+        :param gt_alpha: (N)
+        :return:
+        """
+        aug_list = cfg.AUG_METHOD_LIST
+        aug_enable = 1 - np.random.rand(3)
+        if mustaug is True:
+            aug_enable[0] = -1
+            aug_enable[1] = -1
+        aug_method = []
 
-    def data_augmentation(self, aug_pts_rect, aug_gt_boxes3d, gt_alpha, sample_id=None, mustaug=False, stage=1): 
-        raise NotImplementedError
+        if 'rotation' in aug_list and aug_enable[0] < cfg.AUG_METHOD_PROB[0]:
+            # rotate around z-axis 
+            rot_range = [-np.pi / cfg.AUG_ROT_RANGE, np.pi / cfg.AUG_ROT_RANGE]
+            # xyz change, hwl unchange
+            aug_gt_boxes3d, aug_pts_rect = kitti_utils.global_rotation(aug_gt_boxes3d, aug_pts_rect, rot_range)
+            aug_method.append(['rotation', angle])
 
+        if 'scaling' in aug_list and aug_enable[1] < cfg.AUG_METHOD_PROB[1]:
+            scale = np.random.uniform(0.95, 1.05)
+            aug_pts_rect *= scale
+            aug_gt_boxes3d[:, 0:6] *= scale
+            aug_method.append(['scaling', scale])
+
+        if 'flip' in aug_list and aug_enable[2] < cfg.AUG_METHOD_PROB[2]:
+            # random horizontal flip along y axis 
+            aug_gt_boxes3d[:, 0] = -aug_gt_boxes3d[:, 0]
+            # flip orientation: ry > 0: pi - ry, ry < 0: -pi - ry
+            aug_gt_boxes3d[:, 6] = -(aug_gt_boxes3d[:, 6] + np.pi)   
+            aug_pts_rect[:, 0] = -aug_pts_rect[:, 0]
+
+            if gt_boxes.shape[1] > 7:
+                gt_boxes[:, 7] = -gt_boxes[:, 7]
+            aug_method.append('flip')
+
+        return aug_pts_rect, aug_gt_boxes3d, aug_method
+        
     def get_rcnn_sample_jit(self, index):
         raise NotImplementedError
 

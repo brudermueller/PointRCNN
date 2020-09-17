@@ -69,25 +69,23 @@ def create_logger(log_file):
     return logging.getLogger(__name__)
 
 
-def save_kitti_format(sample_id, bbox3d, kitti_output_dir, scores): # (sample_id, calib, bbox3d, kitti_output_dir, scores, img_shape))
-    kitti_output_file = os.path.join(kitti_output_dir, '%06d.txt' % sample_id)
-    with open(kitti_output_file, 'w') as f:
+def save_txt_format(sample_id, bbox3d, output_dir, scores): # (sample_id, calib, bbox3d, kitti_output_dir, scores, img_shape))
+    output_file = os.path.join(output_dir, '%06d.txt' % sample_id)
+    with open(output_file, 'w') as f:
         for k in range(bbox3d.shape[0]):
             # if box_valid_mask[k] == 0:
             #     continue
-            x, z, ry = bbox3d[k, 0], bbox3d[k, 2], bbox3d[k, 6]
-            beta = np.arctan2(z, x)
+            x, y, rz = bbox3d[k, 0], bbox3d[k, 2], bbox3d[k, 6]
+            beta = np.arctan2(y, x)
             alpha = -np.sign(beta) * np.pi / 2 + beta + ry
 
-            # print('%s -1 -1 %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f' %
-            #       (cfg.CLASSES, alpha, img_boxes[k, 0], img_boxes[k, 1], img_boxes[k, 2], img_boxes[k, 3],
-            #        bbox3d[k, 3], bbox3d[k, 4], bbox3d[k, 5], bbox3d[k, 0], bbox3d[k, 1], bbox3d[k, 2],
-            #        bbox3d[k, 6], scores[k]), file=f)
-
-            print('%s -1 -1 %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f' %
+            print('%s %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f' %
                   (cfg.CLASSES,
-                   bbox3d[k, 3], bbox3d[k, 4], bbox3d[k, 5], bbox3d[k, 0], bbox3d[k, 1], bbox3d[k, 2],
-                   bbox3d[k, 6], scores[k]), file=f)
+                   alpha,
+                   bbox3d[k, 0], bbox3d[k, 1], bbox3d[k, 2], # x, y, z 
+                   bbox3d[k, 3], bbox3d[k, 4], bbox3d[k, 5], # h, w, l 
+                   bbox3d[k, 6], # angle 
+                   scores[k]), file=f) 
 
 
 def save_rpn_features(seg_result, rpn_scores_raw, pts_features, backbone_xyz, backbone_features, kitti_features_dir,
@@ -140,7 +138,7 @@ def eval_one_epoch_rpn(model, dataloader, epoch_id, result_dir, logger):
 
         if not args.test: # evaluate with ground truth 
             rpn_cls_label, rpn_reg_label = data['rpn_cls_label'], data['rpn_reg_label']
-            print('======> rpn reg label:  \n{}'.format(rpn_reg_label[0,0,:]))
+            # print('======> rpn reg label:  \n{}'.format(rpn_reg_label[0,0,:]))
 
             gt_boxes3d = data['gt_boxes3d']
             logger.debug('==> Evaluating with ground truth: {}'.format(gt_boxes3d))
@@ -342,13 +340,17 @@ def eval_one_epoch_rcnn(model, dataloader, epoch_id, result_dir, logger):
             # calculate recall
             gt_num = gt_boxes3d.shape[0]
             if gt_num > 0:
-                iou3d = iou3d_utils.boxes_iou3d_gpu(pred_boxes3d, gt_boxes3d)
+                # iou3d = iou3d_utils.boxes_iou3d_gpu(pred_boxes3d, gt_boxes3d)
+                iou3d = iou3d_utils.boxes_iou3d_gpu_velodyne(pred_boxes3d, gt_boxes3d)
+
                 gt_max_iou, _ = iou3d.max(dim=0)
                 refined_iou, _ = iou3d.max(dim=1)
 
                 for idx, thresh in enumerate(thresh_list):
                     total_recalled_bbox_list[idx] += (gt_max_iou > thresh).sum().item()
-                recalled_num = (gt_max_iou > 0.7).sum().item()
+                # recalled_num = (gt_max_iou > 0.7).sum().item()
+                recalled_num = (gt_max_iou > 0.5).sum().item()
+
                 total_gt_bbox += gt_num
 
                 iou3d_in = iou3d_utils.boxes_iou3d_gpu(roi_boxes3d, gt_boxes3d)

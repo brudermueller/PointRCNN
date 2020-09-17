@@ -7,86 +7,119 @@ def cls_type_to_id(cls_type):
         return -1
     return type_to_id[cls_type]
 
-
 class Object3d(object):
-    def __init__(self, line):
-        label = line.strip().split(' ')
-        self.src = line
-        self.cls_type = label[0]
-        self.cls_id = cls_type_to_id(self.cls_type)
-        self.trucation = float(label[1])
-        self.occlusion = float(label[2])  # 0:fully visible 1:partly occluded 2:largely occluded 3:unknown
-        self.alpha = float(label[3])
-        self.box2d = np.array((float(label[4]), float(label[5]), float(label[6]), float(label[7])), dtype=np.float32)
-        self.h = float(label[8])
-        self.w = float(label[9])
-        self.l = float(label[10])
-        self.pos = np.array((float(label[11]), float(label[12]), float(label[13])), dtype=np.float32)
-        self.dis_to_cam = np.linalg.norm(self.pos)
-        self.ry = float(label[14])
-        self.score = float(label[15]) if label.__len__() == 16 else -1.0
-        self.level_str = None
-        self.level = self.get_obj_level()
-
-    def get_obj_level(self):
-        height = float(self.box2d[3]) - float(self.box2d[1]) + 1
-
-        if height >= 40 and self.trucation <= 0.15 and self.occlusion <= 0:
-            self.level_str = 'Easy'
-            return 1  # Easy
-        elif height >= 25 and self.trucation <= 0.3 and self.occlusion <= 1:
-            self.level_str = 'Moderate'
-            return 2  # Moderate
-        elif height >= 25 and self.trucation <= 0.5 and self.occlusion <= 2:
-            self.level_str = 'Hard'
-            return 3  # Hard
-        else:
-            self.level_str = 'UnKnown'
-            return 4
+    def __init__(self, line, gt=False): # if read from ground truth label, the txt file looks different 
+        if gt: 
+            bbox = line 
+            # line is in this case the bbox itself 
+            self.pos = np.array((float(bbox[0]), float(bbox[1]), float(bbox[2])), dtype=np.float32)
+            self.h, self.w, self.l = float(bbox[3]), float(bbox[4]), float(bbox[5])
+            self.rz =  float(bbox[6])  # rotation angle around z-axis (instead of y as in camera coord.)
+            self.dis_to_cam = np.linalg.norm(self.pos)
+            # According to KITTI definition
+            self.cls_type = 'Pedestrian'
+            self.cls_id = 2
+            beta = np.arctan2(self.pos[2], self.pos[0])
+            self.alpha = -np.sign(beta) * np.pi / 2 + beta + self.rz
+            self.score = -1.0
+        
+        else: # read from detection file including more information 
+            label = line.strip().split(' ')
+            self.src = line
+            self.cls_type = label[0]
+            self.cls_id = cls_type_to_id(self.cls_type)
+            self.alpha = float(label[1])
+            # self.box2d = np.array((float(label[4]), float(label[5]), float(label[6]), float(label[7])), dtype=np.float32)
+            self.h = float(label[5])
+            self.w = float(label[6])
+            self.l = float(label[7])
+            self.pos = np.array((float(label[2]), float(label[3]), float(label[4])), dtype=np.float32)
+            self.dis_to_cam = np.linalg.norm(self.pos)
+            self.rz = float(label[8])
+            self.score = float(label[9]) 
+                    
 
     def generate_corners3d(self):
         """
-        generate corners3d representation for this object
-        :return corners_3d: (8, 3) corners of box3d in camera coord
+        Generate corners3d representation for this object
+            7 -------- 6
+           /|         /|
+          4 -------- 5 .
+          | |        | |
+          . 3 -------- 2
+          |/         |/
+          0 -------- 1
+        :return corners_3d: (8, 3) corners of oriented box3d in Velodyne coord.
         """
         l, h, w = self.l, self.h, self.w
-        x_corners = [l / 2, l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2]
-        y_corners = [0, 0, 0, 0, -h, -h, -h, -h]
-        z_corners = [w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2, w / 2]
+        # careful: width, length and height have been differently defined than in KITTI
+        x_corners = [w / 2, w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2]        
+        y_corners = [-l / 2, l / 2, l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2]
+        z_corners = [-h / 2, -h / 2, -h / 2, -h / 2, h / 2, h / 2, h / 2, h / 2]
 
-        R = np.array([[np.cos(self.ry), 0, np.sin(self.ry)],
-                      [0, 1, 0],
-                      [-np.sin(self.ry), 0, np.cos(self.ry)]])
+        # rotation now defined in Velodyne coords. -> around z-axis => yaw rot. 
+        R = np.array([[np.cos(self.rz), -np.sin(self.rz), 0],
+                      [np.sin(self.rz), np.cos(self.rz), 0],
+                      [0, 0, 1]])
         corners3d = np.vstack([x_corners, y_corners, z_corners])  # (3, 8)
+        # transpose and rotate around orientation angle 
         corners3d = np.dot(R, corners3d).T
         corners3d = corners3d + self.pos
         return corners3d
 
-    def to_bev_box2d(self, oblique=True, voxel_size=0.1):
-        """
-        :param bev_shape: (2) for bev shape (h, w), => (y_max, x_max) in image
-        :param voxel_size: float, 0.1m
-        :param oblique:
-        :return: box2d (4, 2)/ (4) in image coordinate
-        """
-        if oblique:
-            corners3d = self.generate_corners3d()
-            xz_corners = corners3d[0:4, [0, 2]]
-            box2d = np.zeros((4, 2), dtype=np.int32)
-            box2d[:, 0] = ((xz_corners[:, 0] - Object3d.MIN_XZ[0]) / voxel_size).astype(np.int32)
-            box2d[:, 1] = Object3d.BEV_SHAPE[0] - 1 - ((xz_corners[:, 1] - Object3d.MIN_XZ[1]) / voxel_size).astype(np.int32)
-            box2d[:, 0] = np.clip(box2d[:, 0], 0, Object3d.BEV_SHAPE[1])
-            box2d[:, 1] = np.clip(box2d[:, 1], 0, Object3d.BEV_SHAPE[0])
-        else:
-            box2d = np.zeros(4, dtype=np.int32)
-            # discrete_center = np.floor((self.pos / voxel_size)).astype(np.int32)
-            cu = np.floor((self.pos[0] - Object3d.MIN_XZ[0]) / voxel_size).astype(np.int32)
-            cv = Object3d.BEV_SHAPE[0] - 1 - ((self.pos[2] - Object3d.MIN_XZ[1]) / voxel_size).astype(np.int32)
-            half_l, half_w = int(self.l / voxel_size / 2), int(self.w / voxel_size / 2)
-            box2d[0], box2d[1] = cu - half_l, cv - half_w
-            box2d[2], box2d[3] = cu + half_l, cv + half_w
 
-        return box2d
+    def generate_unoriented_bbox(self): 
+        """ 
+        Generate 3d bounding box with 8 vertices saved as np.array (of shape (8,3)) for the 
+        3d box in following order:
+            7 -------- 6
+           /|         /|
+          4 -------- 5 .
+          | |        | |
+          . 3 -------- 2
+          |/         |/
+          0 -------- 1
+
+        Returns:
+            bbox np.ndarray
+        """
+        x, y, z, h, w, l = self.x, self.y, self.z, self.h, self.w, self.l
+        box8 = np.array(
+            [
+                [
+                    x + w / 2,
+                    x + w / 2,
+                    x - w / 2,
+                    x - w / 2,
+                    x + w / 2,
+                    x + w / 2,
+                    x - w / 2,
+                    x - w / 2,
+                ],
+                [
+                    y - l / 2,
+                    y + l / 2,
+                    y + l / 2,
+                    y - l / 2,
+                    y - l / 2,
+                    y + l / 2,
+                    y + l / 2,
+                    y - l / 2,
+                ],
+                [
+                    0,
+                    0,
+                    0,
+                    0,
+                    z + h / 2,
+                    z + h / 2,
+                    z + h / 2,
+                    z + h / 2,
+                ],
+            ]
+        )
+        return box8.T
+
 
     def to_str(self):
         print_str = '%s %.3f %.3f %.3f box2d: %s hwl: [%.3f %.3f %.3f] pos: %s ry: %.3f' \
@@ -94,10 +127,10 @@ class Object3d(object):
                         self.pos, self.ry)
         return print_str
 
-    def to_kitti_format(self):
-        kitti_str = '%s %.2f %d %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f' \
-                    % (self.cls_type, self.trucation, int(self.occlusion), self.alpha, self.box2d[0], self.box2d[1],
-                       self.box2d[2], self.box2d[3], self.h, self.w, self.l, self.pos[0], self.pos[1], self.pos[2],
-                       self.ry)
-        return kitti_str
+    # def to_kitti_format(self):
+    #     kitti_str = '%s %.2f %d %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f' \
+    #                 % (self.cls_type, self.trucation, int(self.occlusion), self.alpha, self.box2d[0], self.box2d[1],
+    #                    self.box2d[2], self.box2d[3], self.h, self.w, self.l, self.pos[0], self.pos[1], self.pos[2],
+    #                    self.ry)
+    #     return kitti_str
 

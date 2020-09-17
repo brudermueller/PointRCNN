@@ -41,6 +41,34 @@ def rotate_pc_along_y(pc, rot_angle):
     pc[:, [0, 2]] = np.dot(pc[:, [0, 2]], np.transpose(rotmat))
     return pc
 
+def check_numpy_to_torch(x):
+    if isinstance(x, np.ndarray):
+        return torch.from_numpy(x).float(), True
+    return x, False
+
+def rotate_pc_along_z(points, angle):
+    """
+    Args:
+        points: (B, N, 3 + C)
+        angle: (B), angle along z-axis, angle increases x ==> y
+    Returns:
+    """
+    points, is_numpy = check_numpy_to_torch(points)
+    angle, _ = check_numpy_to_torch(angle)
+
+    cosa = torch.cos(angle)
+    sina = torch.sin(angle)
+    zeros = angle.new_zeros(points.shape[0])
+    ones = angle.new_ones(points.shape[0])
+    rot_matrix = torch.stack((
+        cosa,  sina, zeros,
+        -sina, cosa, zeros,
+        zeros, zeros, ones
+    ), dim=1).view(-1, 3, 3).float()
+    points_rot = torch.matmul(points[:, :, 0:3], rot_matrix)
+    points_rot = torch.cat((points_rot, points[:, :, 3:]), dim=-1)
+    return points_rot.numpy() if is_numpy else points_rot
+
 
 def rotate_pc_along_y_torch(pc, rot_angle):
     """
@@ -229,15 +257,15 @@ def boxes3d_to_bev_torch_velodyne(boxes3d):
 
 def enlarge_box3d(boxes3d, extra_width):
     """
-    :param boxes3d: (N, 7) [x, y, z, h, w, l, ry]
+    :param boxes3d: (N, 7) [x, y, z, h, w, l, rz]
+    :param extra_width: constant value
     """
     if isinstance(boxes3d, np.ndarray):
         large_boxes3d = boxes3d.copy()
     else:
         large_boxes3d = boxes3d.clone()
     large_boxes3d[:, 3:6] += extra_width * 2
-    # large_boxes3d[:, 1] += extra_width
-    large_boxes3d[:, 2] += extra_width
+    # large_boxes3d[:, 2] += extra_width
     return large_boxes3d
 
 
@@ -265,6 +293,7 @@ def objs_to_boxes3d(obj_list):
             = obj.pos, obj.h, obj.w, obj.l, obj.ry
     return boxes3d
 
+
 def objs_to_boxes3d_velodyne(obj_list):
     boxes3d = np.zeros((obj_list.__len__(), 7), dtype=np.float32)
     for k, obj in enumerate(obj_list):
@@ -272,11 +301,55 @@ def objs_to_boxes3d_velodyne(obj_list):
             = obj.pos, obj.h, obj.w, obj.l, obj.rz
     return boxes3d
 
+
 def objs_to_scores(obj_list):
     scores = np.zeros((obj_list.__len__()), dtype=np.float32)
     for k, obj in enumerate(obj_list):
         scores[k] = obj.score
     return scores
+
+
+def get_iou3d_velodyne(corners3d, query_corners3d, need_bev=False):
+    """	
+    :param corners3d: (N, 8, 3) in rect coords	
+    :param query_corners3d: (M, 8, 3)	
+    :return:	
+    """
+    from shapely.geometry import Polygon
+    A, B = corners3d, query_corners3d
+    N, M = A.shape[0], B.shape[0]
+    iou3d = np.zeros((N, M), dtype=np.float32)
+    iou_bev = np.zeros((N, M), dtype=np.float32)
+
+    # for height overlap, using z-coordinate
+    min_h_a = A[:, 0:4, 2].sum(axis=1) / 4.0 # taking z coordinates of corners 
+    max_h_a = A[:, 4:8, 2].sum(axis=1) / 4.0
+    min_h_b = B[:, 0:4, 2].sum(axis=1) / 4.0
+    max_h_b = B[:, 4:8, 2].sum(axis=1) / 4.0
+
+    for i in range(N):
+        for j in range(M):
+            max_of_min = np.max([min_h_a[i], min_h_b[j]])
+            min_of_max = np.min([max_h_a[i], max_h_b[j]])	
+            h_overlap = np.max([0, min_of_max - max_of_min])
+            if h_overlap == 0:
+                continue
+
+            bottom_a, bottom_b = Polygon(A[i, 0:4, [0, 1]].T), Polygon(B[j, 0:4, [0, 1]].T)
+            if bottom_a.is_valid and bottom_b.is_valid:
+                # check is valid,  A valid Polygon may not possess any overlapping exterior or interior rings.
+                bottom_overlap = bottom_a.intersection(bottom_b).area
+            else:
+                bottom_overlap = 0.
+            overlap3d = bottom_overlap * h_overlap
+            union3d = bottom_a.area * (max_h_a[i] - min_h_a[i]) + bottom_b.area * (max_h_b[j] - min_h_b[j]) - overlap3d
+            iou3d[i][j] = overlap3d / union3d
+            iou_bev[i][j] = bottom_overlap / (bottom_a.area + bottom_b.area - bottom_overlap)
+
+    if need_bev:
+        return iou3d, iou_bev
+
+    return iou3d
 
 
 def get_iou3d(corners3d, query_corners3d, need_bev=False):

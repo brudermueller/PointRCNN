@@ -204,16 +204,18 @@ def draw_scenes(points, gt_boxes=None, ref_boxes=None, ref_scores=None, ref_labe
 
     fig = visualize_pts(points, show_intensity=True)
     fig = draw_multi_grid_range(fig, bv_range=(0, -20, 40, 20))
+    # plot detections 
     if gt_boxes is not None:
         corners3d = boxes3d_to_corners3d_velodyne(gt_boxes)
         # box = gt_boxes[0,:]
         # corners3d = generate_corners3d(box)
         fig = draw_corners3d(corners3d, fig=fig, color=(0, 0, 1), max_num=100)
 
+    # plot labels 
     if ref_boxes is not None:
-        # ref_corners3d = boxes3d_to_corners3d_velodyne(ref_boxes)
-        ref_box = ref_boxes[0,:]
-        ref_corners3d = generate_corners3d(ref_box)
+        ref_corners3d = boxes3d_to_corners3d_velodyne(ref_boxes)
+        # ref_box = ref_boxes[0,:]
+        # ref_corners3d = generate_corners3d(ref_box)
         if ref_labels is None:
             fig = draw_corners3d(ref_corners3d, fig=fig, color=(0, 1, 0), cls=ref_scores, max_num=100)
         else:
@@ -235,7 +237,10 @@ def readIntoNumpy(fileName):
         lines = []
         for line in f :
             splitLine = line.rstrip().split()
-            res = splitLine[3:10]   # [x y z h w l ry]
+            # res = splitLine[3:10]   # [h w l x y z ry]
+            res = np.array((float(splitLine[6]), float(splitLine[7]), float(splitLine[8]), # x,y,z
+                            float(splitLine[3]), float(splitLine[4]), float(splitLine[5]), # h,w,l
+                            float(splitLine[9])), dtype=np.float32) # angle
             score = splitLine[10]
             tmp.append(res)
             scores.append(score)

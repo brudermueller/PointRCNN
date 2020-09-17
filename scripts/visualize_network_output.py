@@ -49,5 +49,7 @@ if __name__ == "__main__":
     # fig = draw_scenes(pts, gt_boxes=np.reshape(bboxes3d[best_box_idx,:], (-1,7)), ref_boxes=gt_boxes, foreground_pts=foreground)
     fig = draw_scenes(pts, gt_boxes=np.reshape(bboxes3d, (-1,7)), ref_boxes=gt_boxes, foreground_pts=foreground)
     # fig = draw_scenes(pts, gt_boxes=np.reshape(bboxes3d[best_box_idx,:], (-1,7)), ref_boxes=gt_boxes)
+    # fig = draw_scenes(pts, gt_boxes=None, ref_boxes=gt_boxes, foreground_pts=foreground)
+
 
     mlab.show()

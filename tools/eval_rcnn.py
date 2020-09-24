@@ -44,7 +44,7 @@ parser.add_argument("--extra_tag", type=str, default='default', help="extra tag 
 parser.add_argument('--output_dir', type=str, default=None, help='specify an output directory if needed')
 parser.add_argument("--ckpt_dir", type=str, default=None, help="specify a ckpt directory to be evaluated if needed")
 
-parser.add_argument('--save_result', action='store_true', default=False, help='save evaluation results to files')
+parser.add_argument('--save_result', action='store_true', default=True, help='save evaluation results to files')
 parser.add_argument('--save_rpn_feature', action='store_true', default=False,
                     help='save features for separately rcnn training and evaluation')
 
@@ -77,9 +77,9 @@ def save_txt_format(sample_id, bbox3d, output_dir, scores): # (sample_id, calib,
             #     continue
             x, y, rz = bbox3d[k, 0], bbox3d[k, 2], bbox3d[k, 6]
             beta = np.arctan2(y, x)
-            alpha = -np.sign(beta) * np.pi / 2 + beta + ry
+            alpha = -np.sign(beta) * np.pi / 2 + beta + rz
 
-            print('%s %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f' %
+            print('%s %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f' %
                   (cfg.CLASSES,
                    alpha,
                    bbox3d[k, 0], bbox3d[k, 1], bbox3d[k, 2], # x, y, z 
@@ -226,11 +226,8 @@ def eval_one_epoch_rpn(model, dataloader, epoch_id, result_dir, logger):
                 save_h5_basic(output_file, output_data)
 
                 # save as kitti format
-                # calib = dataset.get_calib(cur_sample_id)
                 cur_boxes3d = cur_boxes3d.cpu().numpy()
-                # image_shape = dataset.get_image_shape(cur_sample_id)
-                # save_kitti_format(cur_sample_id, calib, cur_boxes3d, kitti_output_dir, cur_scores_raw, image_shape)
-                save_kitti_format(cur_sample_id, cur_boxes3d, kitti_output_dir, cur_scores_raw)
+                save_txt_format(cur_sample_id, cur_boxes3d, kitti_output_dir, cur_scores_raw)
 
 
         disp_dict = {'mode': mode, 'recall': '%d/%d' % (total_recalled_bbox_list[3], total_gt_bbox),
@@ -283,6 +280,7 @@ def eval_one_epoch_rcnn(model, dataloader, epoch_id, result_dir, logger):
     progress_bar = tqdm.tqdm(total=len(dataloader), leave=True, desc='eval')
     for data in dataloader:
         sample_id = data['sample_id']
+        print(sample_id)
         cnt += 1
         assert args.batch_size == 1, 'Only support bs=1 here'
         input_data = {}
@@ -316,9 +314,9 @@ def eval_one_epoch_rcnn(model, dataloader, epoch_id, result_dir, logger):
                                           loc_scope=cfg.RCNN.LOC_SCOPE,
                                           loc_bin_size=cfg.RCNN.LOC_BIN_SIZE,
                                           num_head_bin=cfg.RCNN.NUM_HEAD_BIN,
-                                          get_xz_fine=True, get_y_by_bin=cfg.RCNN.LOC_Y_BY_BIN,
-                                          loc_y_scope=cfg.RCNN.LOC_Y_SCOPE, loc_y_bin_size=cfg.RCNN.LOC_Y_BIN_SIZE,
-                                          get_ry_fine=True)
+                                          get_xy_fine=True, get_z_by_bin=cfg.RCNN.LOC_Y_BY_BIN,
+                                          loc_z_scope=cfg.RCNN.LOC_Y_SCOPE, loc_z_bin_size=cfg.RCNN.LOC_Y_BIN_SIZE,
+                                          get_rz_fine=True)
 
         # scoring
         if rcnn_cls.shape[1] == 1:
@@ -377,16 +375,13 @@ def eval_one_epoch_rcnn(model, dataloader, epoch_id, result_dir, logger):
         progress_bar.set_postfix(disp_dict)
         progress_bar.update()
 
-        image_shape = dataset.get_image_shape(sample_id)
         if args.save_result:
             # save roi and refine results
             roi_boxes3d_np = roi_boxes3d.cpu().numpy()
             pred_boxes3d_np = pred_boxes3d.cpu().numpy()
-            calib = dataset.get_calib(sample_id)
 
-            save_kitti_format(sample_id, calib, roi_boxes3d_np, roi_output_dir, roi_scores, image_shape)
-            save_kitti_format(sample_id, calib, pred_boxes3d_np, refine_output_dir, raw_scores.cpu().numpy(),
-                              image_shape)
+            save_txt_format(sample_id, roi_boxes3d_np, roi_output_dir, roi_scores)
+            save_txt_format(sample_id, pred_boxes3d_np, refine_output_dir, raw_scores.cpu().numpy())
 
         # NMS and scoring
         # scores thresh
@@ -398,26 +393,26 @@ def eval_one_epoch_rcnn(model, dataloader, epoch_id, result_dir, logger):
         raw_scores_selected = raw_scores[inds]
 
         # NMS thresh
-        boxes_bev_selected = kitti_utils.boxes3d_to_bev_torch(pred_boxes3d_selected)
+        boxes_bev_selected = kitti_utils.boxes3d_to_bev_torch_velodyne(pred_boxes3d_selected)
         keep_idx = iou3d_utils.nms_gpu(boxes_bev_selected, raw_scores_selected, cfg.RCNN.NMS_THRESH)
         pred_boxes3d_selected = pred_boxes3d_selected[keep_idx]
 
         scores_selected = raw_scores_selected[keep_idx]
         pred_boxes3d_selected, scores_selected = pred_boxes3d_selected.cpu().numpy(), scores_selected.cpu().numpy()
 
-        calib = dataset.get_calib(sample_id)
         final_total += pred_boxes3d_selected.shape[0]
-        save_kitti_format(sample_id, calib, pred_boxes3d_selected, final_output_dir, scores_selected, image_shape)
+        save_txt_format(sample_id, pred_boxes3d_selected, final_output_dir, scores_selected)
 
     progress_bar.close()
 
     # dump empty files
-    split_file = os.path.join(dataset.imageset_dir, '..', '..', 'ImageSets', dataset.split + '.txt')
+    split_file = dataset.split_dir
     split_file = os.path.abspath(split_file)
-    image_idx_list = [x.strip() for x in open(split_file).readlines()]
+    sample_idx_list = [x.strip() for x in open(split_file).readlines()]
     empty_cnt = 0
-    for k in range(image_idx_list.__len__()):
-        cur_file = os.path.join(final_output_dir, '%s.txt' % image_idx_list[k])
+    for k in range(sample_idx_list.__len__()):
+        cur_file_idx = dataset.sample_id_map[sample_idx_list[k]]
+        cur_file = os.path.join(final_output_dir, '%06d.txt' % cur_file_idx)
         if not os.path.exists(cur_file):
             with open(cur_file, 'w') as temp_f:
                 pass
@@ -452,7 +447,7 @@ def eval_one_epoch_rcnn(model, dataloader, epoch_id, result_dir, logger):
         ret_dict['rcnn_recall(thresh=%.2f)' % thresh] = cur_recall
 
     if cfg.TEST.SPLIT != 'test':
-        logger.info('Averate Precision:')
+        logger.info('Average Precision:')
         name_to_class = {'Car': 0, 'Pedestrian': 1, 'Cyclist': 2}
         ap_result_str, ap_dict = kitti_evaluate(dataset.label_dir, final_output_dir, label_split_file=split_file,
                                                 current_class=name_to_class[cfg.CLASSES])
@@ -495,6 +490,7 @@ def eval_one_epoch_joint(model, dataloader, epoch_id, result_dir, logger):
         cnt += 1
         sample_id, pts_rect, pts_features, pts_input = \
             data['sample_id'], data['pts_rect'], data['pts_features'], data['pts_input']
+        # print(sample_id)
         batch_size = len(sample_id)
         inputs = torch.from_numpy(pts_input).cuda(non_blocking=True).float()
         input_data = {'pts_input': inputs}
@@ -519,14 +515,13 @@ def eval_one_epoch_joint(model, dataloader, epoch_id, result_dir, logger):
                                           loc_scope=cfg.RCNN.LOC_SCOPE,
                                           loc_bin_size=cfg.RCNN.LOC_BIN_SIZE,
                                           num_head_bin=cfg.RCNN.NUM_HEAD_BIN,
-                                          get_xz_fine=True, get_y_by_bin=cfg.RCNN.LOC_Y_BY_BIN,
-                                          loc_y_scope=cfg.RCNN.LOC_Y_SCOPE, loc_y_bin_size=cfg.RCNN.LOC_Y_BIN_SIZE,
-                                          get_ry_fine=True).view(batch_size, -1, 7)
+                                          get_xy_fine=True, get_z_by_bin=cfg.RCNN.LOC_Y_BY_BIN,
+                                          loc_z_scope=cfg.RCNN.LOC_Y_SCOPE, loc_z_bin_size=cfg.RCNN.LOC_Y_BIN_SIZE,
+                                          get_rz_fine=True).view(batch_size, -1, 7)
 
         # scoring
         if rcnn_cls.shape[2] == 1:
             raw_scores = rcnn_cls  # (B, M, 1)
-
             norm_scores = torch.sigmoid(raw_scores)
             pred_classes = (norm_scores > cfg.RCNN.SCORE_THRESH).long()
         else:
@@ -599,21 +594,22 @@ def eval_one_epoch_joint(model, dataloader, epoch_id, result_dir, logger):
 
             for k in range(batch_size):
                 cur_sample_id = sample_id[k]
-                calib = dataset.get_calib(cur_sample_id)
-                image_shape = dataset.get_image_shape(cur_sample_id)
-                save_kitti_format(cur_sample_id, calib, roi_boxes3d_np[k], roi_output_dir,
-                                  roi_scores_raw_np[k], image_shape)
-                save_kitti_format(cur_sample_id, calib, pred_boxes3d_np[k], refine_output_dir,
-                                  raw_scores_np[k], image_shape)
+                save_txt_format(cur_sample_id, roi_boxes3d_np[k], roi_output_dir, roi_scores_raw_np[k])
+                save_txt_format(cur_sample_id, pred_boxes3d_np[k], refine_output_dir, raw_scores_np[k])
 
                 output_file = os.path.join(rpn_output_dir, '%06d.npy' % cur_sample_id)
                 np.save(output_file, output_data.astype(np.float32))
 
         # scores thresh
+        # print(norm_scores.size())
+        # print(norm_scores.max())
         inds = norm_scores > cfg.RCNN.SCORE_THRESH
 
         for k in range(batch_size):
             cur_inds = inds[k].view(-1)
+            # print('Selected number of boxes: {}'.format(cur_inds.sum()))
+
+            # print(cur_inds)
             if cur_inds.sum() == 0:
                 continue
 
@@ -623,26 +619,26 @@ def eval_one_epoch_joint(model, dataloader, epoch_id, result_dir, logger):
 
             # NMS thresh
             # rotated nms
-            boxes_bev_selected = kitti_utils.boxes3d_to_bev_torch(pred_boxes3d_selected)
+            boxes_bev_selected = kitti_utils.boxes3d_to_bev_torch_velodyne(pred_boxes3d_selected)
             keep_idx = iou3d_utils.nms_gpu(boxes_bev_selected, raw_scores_selected, cfg.RCNN.NMS_THRESH).view(-1)
+            print('Keep boxes after NMS with thresh {}: {}'.format(cfg.RCNN.NMS_THRESH, len(keep_idx)))
             pred_boxes3d_selected = pred_boxes3d_selected[keep_idx]
             scores_selected = raw_scores_selected[keep_idx]
             pred_boxes3d_selected, scores_selected = pred_boxes3d_selected.cpu().numpy(), scores_selected.cpu().numpy()
 
             cur_sample_id = sample_id[k]
-            calib = dataset.get_calib(cur_sample_id)
             final_total += pred_boxes3d_selected.shape[0]
-            image_shape = dataset.get_image_shape(cur_sample_id)
-            save_kitti_format(cur_sample_id, calib, pred_boxes3d_selected, final_output_dir, scores_selected, image_shape)
+            save_txt_format(cur_sample_id, pred_boxes3d_selected, final_output_dir, scores_selected)
 
     progress_bar.close()
     # dump empty files
-    split_file = os.path.join(dataset.imageset_dir, '..', '..', 'ImageSets', dataset.split + '.txt')
+    split_file = dataset.split_dir
     split_file = os.path.abspath(split_file)
-    image_idx_list = [x.strip() for x in open(split_file).readlines()]
+    sample_idx_list = [x.strip() for x in open(split_file).readlines()]
     empty_cnt = 0
-    for k in range(image_idx_list.__len__()):
-        cur_file = os.path.join(final_output_dir, '%s.txt' % image_idx_list[k])
+    for k in range(sample_idx_list.__len__()):
+        cur_file_idx = dataset.sample_id_map[sample_idx_list[k]]
+        cur_file = os.path.join(final_output_dir, '%06d.txt' % cur_file_idx)
         if not os.path.exists(cur_file):
             with open(cur_file, 'w') as temp_f:
                 pass
@@ -680,7 +676,7 @@ def eval_one_epoch_joint(model, dataloader, epoch_id, result_dir, logger):
         ret_dict['rcnn_recall(thresh=%.2f)' % thresh] = cur_recall
 
     if cfg.TEST.SPLIT != 'test':
-        logger.info('Averate Precision:')
+        logger.info('Average Precision:')
         name_to_class = {'Car': 0, 'Pedestrian': 1, 'Cyclist': 2}
         ap_result_str, ap_dict = kitti_evaluate(dataset.label_dir, final_output_dir, label_split_file=split_file,
                                                 current_class=name_to_class[cfg.CLASSES])

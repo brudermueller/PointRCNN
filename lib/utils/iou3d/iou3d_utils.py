@@ -25,8 +25,8 @@ def boxes_iou3d_gpu(boxes_a, boxes_b):
     :return:
         ans_iou: (M, N)
     """
-    boxes_a_bev = kitti_utils.boxes3d_to_bev_torch(boxes_a)
-    boxes_b_bev = kitti_utils.boxes3d_to_bev_torch(boxes_b)
+    boxes_a_bev = kitti_utils.boxes3d_to_bev_torch_velodyne(boxes_a)
+    boxes_b_bev = kitti_utils.boxes3d_to_bev_torch_velodyne(boxes_b)
 
     # bev overlap
     overlaps_bev = torch.cuda.FloatTensor(torch.Size((boxes_a.shape[0], boxes_b.shape[0]))).zero_()  # (N, M)

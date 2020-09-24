@@ -85,7 +85,7 @@ def _sigmoid_cross_entropy_with_logits(logits, labels):
 
 
 def get_reg_loss(pred_reg, reg_label, loc_scope, loc_bin_size, num_head_bin, anchor_size,
-                 get_xz_fine=True, get_z_by_bin=False, loc_z_scope=0.5, loc_z_bin_size=0.25, get_ry_fine=False):
+                 get_xy_fine=True, get_z_by_bin=False, loc_z_scope=0.5, loc_z_bin_size=0.25, get_rz_fine=False):
 
     """
     Bin-based 3D bounding boxes regression loss. See https://arxiv.org/abs/1812.04244 for more details.
@@ -96,11 +96,11 @@ def get_reg_loss(pred_reg, reg_label, loc_scope, loc_bin_size, num_head_bin, anc
     :param loc_bin_size: constant
     :param num_head_bin: constant
     :param anchor_size: (N, 3) or (3)
-    :param get_xz_fine:
-    :param get_y_by_bin:
-    :param loc_y_scope:
-    :param loc_y_bin_size:
-    :param get_ry_fine:
+    :param get_xy_fine:
+    :param get_z_by_bin:
+    :param loc_z_scope:
+    :param loc_z_bin_size:
+    :param get_rz_fine:
     :return:
     """
     per_loc_bin_num = int(loc_scope / loc_bin_size) * 2
@@ -111,7 +111,7 @@ def get_reg_loss(pred_reg, reg_label, loc_scope, loc_bin_size, num_head_bin, anc
 
     # xz localization loss
     x_offset_label, y_offset_label, z_offset_label = reg_label[:, 0], reg_label[:, 1], reg_label[:, 2]
-    x_shift = torch.clamp(x_offset_label + loc_scope, 0, loc_scope * 2 - 1e-3)
+    x_shift = torch.clamp(x_offset_label + loc_scope, 0, loc_scope * 2 - 1e-3) # clamp (x_offset_label+search range) into range (0, loc_scope*2) 
     y_shift = torch.clamp(y_offset_label + loc_scope, 0, loc_scope * 2 - 1e-3)
     x_bin_label = (x_shift / loc_bin_size).floor().long()
     y_bin_label = (y_shift / loc_bin_size).floor().long()
@@ -126,13 +126,14 @@ def get_reg_loss(pred_reg, reg_label, loc_scope, loc_bin_size, num_head_bin, anc
     reg_loss_dict['loss_y_bin'] = loss_y_bin.item()
     loc_loss += loss_x_bin + loss_y_bin
 
-    if get_xz_fine:
+    if get_xy_fine:
         x_res_l, x_res_r = per_loc_bin_num * 2, per_loc_bin_num * 3
         y_res_l, y_res_r = per_loc_bin_num * 3, per_loc_bin_num * 4
         start_offset = y_res_r
 
         x_res_label = x_shift - (x_bin_label.float() * loc_bin_size + loc_bin_size / 2)
-        y_res_label = y_shift - (y_bin_label.float() * loc_bin_size + loc_bin_size / 2)
+        # y_res_label = y_shift - (y_bin_label.float() * loc_bin_size + loc_bin_size / 2)
+        y_res_label = y_shift + (y_bin_label.float() * loc_bin_size + loc_bin_size / 2)
         x_res_norm_label = x_res_label / loc_bin_size
         y_res_norm_label = y_res_label / loc_bin_size
 
@@ -155,7 +156,8 @@ def get_reg_loss(pred_reg, reg_label, loc_scope, loc_bin_size, num_head_bin, anc
 
         z_shift = torch.clamp(z_offset_label + loc_z_scope, 0, loc_z_scope * 2 - 1e-3)
         z_bin_label = (z_shift / loc_z_bin_size).floor().long()
-        z_res_label = z_shift - (z_bin_label.float() * loc_z_bin_size + loc_z_bin_size / 2)
+        # z_res_label = z_shift - (z_bin_label.float() * loc_z_bin_size + loc_z_bin_size / 2)
+        z_res_label = z_shift + (z_bin_label.float() * loc_z_bin_size + loc_z_bin_size / 2)
         z_res_norm_label = z_res_label / loc_z_bin_size
 
         z_bin_onehot = torch.cuda.FloatTensor(z_bin_label.size(0), loc_z_bin_num).zero_()
@@ -182,7 +184,7 @@ def get_reg_loss(pred_reg, reg_label, loc_scope, loc_bin_size, num_head_bin, anc
 
     ry_label = reg_label[:, 6]
 
-    if get_ry_fine:
+    if get_rz_fine:
         # divide pi/2 into several bins
         angle_per_class = (np.pi / 2) / num_head_bin
 

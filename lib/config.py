@@ -39,7 +39,7 @@ __C.RPN.FIXED = False
 __C.RPN.USE_INTENSITY = True
 
 # config of bin-based loss
-__C.RPN.LOC_XZ_FINE = False
+__C.RPN.LOC_XY_FINE = False
 __C.RPN.LOC_SCOPE = 3.0
 __C.RPN.LOC_BIN_SIZE = 0.5
 __C.RPN.NUM_HEAD_BIN = 12

@@ -40,7 +40,7 @@ class RPN(nn.Module):
         # regression branch -> Bounding Box regression 
         # -----------------------------------------------------
         per_loc_bin_num = int(cfg.RPN.LOC_SCOPE / cfg.RPN.LOC_BIN_SIZE) * 2
-        if cfg.RPN.LOC_XZ_FINE:
+        if cfg.RPN.LOC_XY_FINE:
             reg_channel = per_loc_bin_num * 4 + cfg.RPN.NUM_HEAD_BIN * 2 + 3
         else:
             reg_channel = per_loc_bin_num * 2 + cfg.RPN.NUM_HEAD_BIN * 2 + 3
@@ -77,6 +77,7 @@ class RPN(nn.Module):
             nn.init.constant_(self.rpn_cls_layer[2].conv.bias, -np.log((1 - pi) / pi))
 
         nn.init.normal_(self.rpn_reg_layer[-1].conv.weight, mean=0, std=0.001)
+        # cur_logger.info('RPN shape of weight of last layer: {}'.format(self.rpn_reg_layer[-1].conv.weight.size()))
 
     def forward(self, input_data):
         """

@@ -13,6 +13,7 @@ parser = argparse.ArgumentParser(description="arg parser")
 parser.add_argument('--id', type=int, default=0, required=True, help='Specify the sample id to be evaluated/visualized.')
 parser.add_argument('--train_run_id', type=int, default=1, help='Specify the id of the trained network to be evaluated/visualized.')
 parser.add_argument('--epoch_no', type=int, default=5, help='Specify the epoch number.')
+parser.add_argument('--mode', type=str, default='rpn', required=True, help='Specify which stage to evaluate.')
 
 args = parser.parse_args()
 
@@ -34,22 +35,24 @@ if __name__ == "__main__":
     elif idx >= 100: digit = '0' + str(idx)
     elif idx >=10: digit = '00' + str(idx)
     else: digit = '000' + str(idx)
-    bboxes3d_path = os.path.join(OUTPUT_PATH, "rpn/pedestrian{}/eval/epoch_{}/val/detections/data/00{}.txt".format(args.train_run_id, args.epoch_no, digit))
+    # bboxes3d_path = os.path.join(OUTPUT_PATH, "{}/pedestrian{}/eval/epoch_{}/val/detections/data/00{}.txt".format(args.mode, args.train_run_id, args.epoch_no, digit))
+    bboxes3d_path = os.path.join(OUTPUT_PATH, "{}/pedestrian{}/eval/epoch_{}/val/final_result/data/00{}.txt".format(args.mode, args.train_run_id, args.epoch_no, digit))
     bboxes3d, scores = readIntoNumpy(bboxes3d_path)
     best_box_idx = np.argmax(scores)
     gt_boxes = np.reshape(bboxes, (-1, 7))
 
     # load foreground segmentation results 
-    seg_pts_file = os.path.join(OUTPUT_PATH, "rpn/pedestrian{}/eval/epoch_{}/val/seg_result/00{}.h5".format(args.train_run_id, args.epoch_no, digit))
-    seg_pts = data_utils.load_h5_basic(seg_pts_file)
-    mask = seg_pts[:,4] > 0 
-    foreground = seg_pts[mask, :][:, 0:3]
-
+    if args.mode == 'rpn': 
+        seg_pts_file = os.path.join(OUTPUT_PATH, "{}/pedestrian{}/eval/epoch_{}/val/seg_result/00{}.h5".format(args.mode, args.train_run_id, args.epoch_no, digit))
+        seg_pts = data_utils.load_h5_basic(seg_pts_file)
+        mask = seg_pts[:,4] > 0 
+        foreground = seg_pts[mask, :][:, 0:3]
+        fig = draw_scenes(pts, gt_boxes=np.reshape(bboxes3d, (-1,7)), ref_boxes=gt_boxes, foreground_pts=foreground)
+    else: 
+        fig = draw_scenes(pts, gt_boxes=np.reshape(bboxes3d, (-1,7)), ref_boxes=gt_boxes) 
 
     # fig = draw_scenes(pts, gt_boxes=np.reshape(bboxes3d[best_box_idx,:], (-1,7)), ref_boxes=gt_boxes, foreground_pts=foreground)
-    fig = draw_scenes(pts, gt_boxes=np.reshape(bboxes3d, (-1,7)), ref_boxes=gt_boxes, foreground_pts=foreground)
     # fig = draw_scenes(pts, gt_boxes=np.reshape(bboxes3d[best_box_idx,:], (-1,7)), ref_boxes=gt_boxes)
     # fig = draw_scenes(pts, gt_boxes=None, ref_boxes=gt_boxes, foreground_pts=foreground)
-
 
     mlab.show()

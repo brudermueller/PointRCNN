@@ -47,12 +47,13 @@ def rotate_points_along_z(points, angle):
         zeros, zeros, ones
     ), dim=1).view(-1, 3, 3).float()
     points_rot = torch.matmul(points[:, :, 0:3], rot_matrix)
+    # print(points_rot.size())
     points_rot = torch.cat((points_rot, points[:, :, 3:]), dim=-1)
     return points_rot.numpy() if is_numpy else points_rot
 
 
 def decode_bbox_target(roi_box3d, pred_reg, loc_scope, loc_bin_size, num_head_bin, anchor_size,
-                       get_xy_fine=True, get_z_by_bin=False, loc_z_scope=0.5, loc_z_bin_size=0.25, get_ry_fine=False):
+                       get_xy_fine=True, get_z_by_bin=False, loc_z_scope=0.5, loc_z_bin_size=0.25, get_rz_fine=False):
     """
     This function is used in both network stages (RPN and RCNN) in order to recover the 3D bounding boxes from regression. 
     :param roi_box3d: (N, 7) for RCNN, (N,3) for RPN # backbone_xyz (coordinates of foreground points)
@@ -62,10 +63,10 @@ def decode_bbox_target(roi_box3d, pred_reg, loc_scope, loc_bin_size, num_head_bi
     :param num_head_bin:
     :param anchor_size:
     :param get_xz_fine:
-    :param get_y_by_bin:
+    :param get_z_by_bin:
     :param loc_y_scope:
     :param loc_y_bin_size:
-    :param get_ry_fine:
+    :param get_rz_fine:
     :return:
     """
     # print('=================== Decode bbox input =================')
@@ -125,7 +126,7 @@ def decode_bbox_target(roi_box3d, pred_reg, loc_scope, loc_bin_size, num_head_bi
 
     ry_bin = torch.argmax(pred_reg[:, ry_bin_l: ry_bin_r], dim=1)
     ry_res_norm = torch.gather(pred_reg[:, ry_res_l: ry_res_r], dim=1, index=ry_bin.unsqueeze(dim=1)).squeeze(dim=1)
-    if get_ry_fine:
+    if get_rz_fine:
         # divide pi/2 into several bins
         angle_per_class = (np.pi / 2) / num_head_bin
         ry_res = ry_res_norm * (angle_per_class / 2)
@@ -149,10 +150,17 @@ def decode_bbox_target(roi_box3d, pred_reg, loc_scope, loc_bin_size, num_head_bi
     roi_center = roi_box3d[:, 0:3]
     shift_ret_box3d = torch.cat((pos_x.view(-1, 1), pos_y.view(-1, 1), pos_z.view(-1, 1), hwl, ry.view(-1, 1)), dim=1)
     ret_box3d = shift_ret_box3d
+
     if roi_box3d.shape[1] == 7: # for RCNN stage 2 
         roi_ry = roi_box3d[:, 6]
+        # print(roi_ry.size())
         # ret_box3d = rotate_pc_along_y_torch(shift_ret_box3d, - roi_ry)
-        ret_box3d = rotate_points_along_z(shift_ret_box3d, - roi_ry)
+        
+        shift_ret_box3d = shift_ret_box3d.unsqueeze(dim=1)
+        shape = list(shift_ret_box3d.size())
+        # print(shape)
+        ret_box3d = rotate_points_along_z(shift_ret_box3d, -roi_ry).squeeze(dim=1)
+        # print(ret_box3d.size())
         ret_box3d[:, 6] += roi_ry
 
     ret_box3d[:, [0, 1]] += roi_center[:, [0, 1]]

@@ -27,9 +27,9 @@ class ProposalLayer(nn.Module):
                                        loc_scope=cfg.RPN.LOC_SCOPE,
                                        loc_bin_size=cfg.RPN.LOC_BIN_SIZE,
                                        num_head_bin=cfg.RPN.NUM_HEAD_BIN,
-                                       get_xy_fine=cfg.RPN.LOC_XZ_FINE,
+                                       get_xy_fine=cfg.RPN.LOC_XY_FINE,
                                        get_z_by_bin=False,
-                                       get_ry_fine=False)  # (N, 7)
+                                       get_rz_fine=False)  # (N, 7)
         proposals[:, 2] -= proposals[:, 3] / 2  # set z as the center of bottom
         # proposals[:, 1] += proposals[:, 3] / 2  # set y as the center of bottom
 

@@ -238,10 +238,17 @@ def readIntoNumpy(fileName):
         for line in f :
             splitLine = line.rstrip().split()
             # res = splitLine[3:10]   # [h w l x y z ry]
-            res = np.array((float(splitLine[6]), float(splitLine[7]), float(splitLine[8]), # x,y,z
-                            float(splitLine[3]), float(splitLine[4]), float(splitLine[5]), # h,w,l
-                            float(splitLine[9])), dtype=np.float32) # angle
-            score = splitLine[10]
+            if len(splitLine) >  10: # old output format 
+                res = np.array((float(splitLine[6]), float(splitLine[7]), float(splitLine[8]), # x,y,z
+                                float(splitLine[3]), float(splitLine[4]), float(splitLine[5]), # h,w,l
+                                float(splitLine[9])), dtype=np.float32) # angle
+                score = splitLine[10]
+
+            else: # new output format 
+                res = np.array((float(splitLine[2]), float(splitLine[3]), float(splitLine[4]), # x,y,z
+                                float(splitLine[5]), float(splitLine[6]), float(splitLine[7]), # h,w,l
+                                float(splitLine[8])), dtype=np.float32) # angle
+                score = splitLine[9]
             tmp.append(res)
             scores.append(score)
     bboxes3d = np.array(tmp,  dtype=np.float32)
